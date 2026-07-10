@@ -1,0 +1,173 @@
+---
+openapi: 3.1.0
+components:
+  schemas:
+    ApiError:
+      type: object
+      properties:
+        message:
+          type: string
+    CreateProductRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        sku:
+          type: string
+        quantity:
+          type: integer
+          format: int32
+    ProductResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        sku:
+          type: string
+        quantity:
+          type: integer
+          format: int32
+    UpdateProductRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        quantity:
+          type: integer
+          format: int32
+paths:
+  /inventory/products:
+    get:
+      responses:
+        "200":
+          description: Listado de productos
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProductResponse"
+      summary: List
+      tags:
+      - Product Resource
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProductRequest"
+        required: true
+      responses:
+        "201":
+          description: Producto creado
+          headers:
+            Location:
+              description: URI del producto creado
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductResponse"
+        "400":
+          description: "Datos inválidos (nombre o sku en blanco, cantidad negativa)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: El SKU ya existe en el inventario
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+      summary: Create
+      tags:
+      - Product Resource
+  /inventory/products/{id}:
+    put:
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProductRequest"
+        required: true
+      responses:
+        "200":
+          description: Producto actualizado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductResponse"
+        "400":
+          description: "Datos inválidos (nombre en blanco, cantidad negativa)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: No existe un producto con ese id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+      summary: Update
+      tags:
+      - Product Resource
+    get:
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        "200":
+          description: Producto encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductResponse"
+        "404":
+          description: No existe un producto con ese id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+      summary: Get By Id
+      tags:
+      - Product Resource
+    delete:
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        "204":
+          description: Producto eliminado
+        "404":
+          description: No existe un producto con ese id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+      summary: Delete
+      tags:
+      - Product Resource
+info:
+  title: api API
+  version: 1.0.0-SNAPSHOT
