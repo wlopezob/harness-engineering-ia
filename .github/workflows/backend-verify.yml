@@ -4,20 +4,10 @@ on:
   pull_request:
     branches:
       - main
-    # paths:
-    #   - "orders-platform/apps/api/**"
-    #   - "orders-platform/contracts/**"
-    #   - "orders-platform/CLAUDE.md"
-    #   - ".github/workflows/backend-verify.yml"
-  
+
   push:
     branches:
       - main
-    # paths:
-    #   - "orders-platform/apps/api/**"
-    #   - "orders-platform/contracts/**"
-    #   - "orders-platform/CLAUDE.md"
-    #   - ".github/workflows/backend-verify.yml"
 
 permissions:
   contents: read
@@ -35,11 +25,11 @@ jobs:
     defaults:
       run:
         working-directory: orders-platform/apps/api
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      
+
       - name: Set up Java 21
         uses: actions/setup-java@v4
         with:
@@ -47,17 +37,17 @@ jobs:
           java-version: "21"
           cache: maven
           cache-dependency-path: orders-platform/apps/api/pom.xml
-      
+
       - name: Grant execute permission to Maven Wrapper
         run: chmod +x mvnw
-      
+
       - name: Verify backend harness
         run: ./mvnw --batch-mode --no-transfer-progress clean verify
-      
+
       - name: Upload test evidence
         if: always()
         uses: actions/upload-artifact@v4
-        with: 
+        with:
           name: backend-test-evidence-${{ github.run_id }}
           if-no-files-found: warn
           retention-days: 14
