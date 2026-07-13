@@ -2,20 +2,22 @@ name: Backend Verify
 
 on:
   pull_request:
-    paths:
-      - "orders-platform/apps/api/**"
-      - "orders-platform/contracts/**"
-      - "orders-platform/CLAUDE.md"
-      - ".github/workflows/backend-verify.yml"
+    branches:
+      - main
+    # paths:
+    #   - "orders-platform/apps/api/**"
+    #   - "orders-platform/contracts/**"
+    #   - "orders-platform/CLAUDE.md"
+    #   - ".github/workflows/backend-verify.yml"
   
   push:
     branches:
       - main
-    paths:
-      - "orders-platform/apps/api/**"
-      - "orders-platform/contracts/**"
-      - "orders-platform/CLAUDE.md"
-      - ".github/workflows/backend-verify.yml"
+    # paths:
+    #   - "orders-platform/apps/api/**"
+    #   - "orders-platform/contracts/**"
+    #   - "orders-platform/CLAUDE.md"
+    #   - ".github/workflows/backend-verify.yml"
 
 permissions:
   contents: read
@@ -36,7 +38,7 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@4
+        uses: actions/checkout@v4
       
       - name: Set up Java 21
         uses: actions/setup-java@v4
@@ -53,7 +55,7 @@ jobs:
         run: ./mvnw --batch-mode --no-transfer-progress clean verify
       
       - name: Upload test evidence
-        if: allways()
+        if: always()
         uses: actions/upload-artifact@v4
         with: 
           name: backend-test-evidence-${{ github.run_id }}
