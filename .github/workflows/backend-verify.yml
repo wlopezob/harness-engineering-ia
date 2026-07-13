@@ -2,20 +2,22 @@ name: Backend Verify
 
 on:
   pull_request:
-    paths:
-      - "orders-platform/apps/api/**"
-      - "orders-platform/contracts/**"
-      - "orders-platform/CLAUDE.md"
-      - ".github/workflows/backend-verify.yml"
+    branches:
+      - main
+    # paths:
+    #   - "orders-platform/apps/api/**"
+    #   - "orders-platform/contracts/**"
+    #   - "orders-platform/CLAUDE.md"
+    #   - ".github/workflows/backend-verify.yml"
   
   push:
     branches:
       - main
-    paths:
-      - "orders-platform/apps/api/**"
-      - "orders-platform/contracts/**"
-      - "orders-platform/CLAUDE.md"
-      - ".github/workflows/backend-verify.yml"
+    # paths:
+    #   - "orders-platform/apps/api/**"
+    #   - "orders-platform/contracts/**"
+    #   - "orders-platform/CLAUDE.md"
+    #   - ".github/workflows/backend-verify.yml"
 
 permissions:
   contents: read
