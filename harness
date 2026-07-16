@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+API_DIR="${ROOT_DIR}/orders-platform/apps/api"
+
+show_usage() {
+  cat <<'EOF'
+Engineering Harness
+
+Usage:
+  ./harness verify
+  ./harness help
+
+Commands:
+  verify   Run the complete backend verification harness.
+  help     Show this help message.
+EOF
+}
+
+verify_backend() {
+  echo "=================================================="
+  echo " Engineering Harness: backend verification"
+  echo "=================================================="
+  echo "Repository: ${ROOT_DIR}"
+  echo "Backend:    ${API_DIR}"
+  echo
+
+  if [[ ! -d "${API_DIR}" ]]; then
+    echo "ERROR: Backend directory not found: ${API_DIR}" >&2
+    exit 2
+  fi
+
+  if [[ ! -f "${API_DIR}/mvnw" ]]; then
+    echo "ERROR: Maven Wrapper not found: ${API_DIR}/mvnw" >&2
+    exit 2
+  fi
+
+  chmod +x "${API_DIR}/mvnw"
+
+  cd "${API_DIR}"
+
+  ./mvnw \
+    --batch-mode \
+    --no-transfer-progress \
+    clean verify
+
+  echo
+  echo "=================================================="
+  echo " HARNESS RESULT: PASSED"
+  echo "=================================================="
+}
+
+COMMAND="${1:-help}"
+
+case "${COMMAND}" in
+  verify)
+    verify_backend
+    ;;
+  help|--help|-h)
+    show_usage
+    ;;
+  *)
+    echo "ERROR: Unknown harness command: ${COMMAND}" >&2
+    echo
+    show_usage
+    exit 2
+    ;;
+esac
