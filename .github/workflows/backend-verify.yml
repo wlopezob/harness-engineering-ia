@@ -37,14 +37,11 @@ jobs:
       - name: Verify engineering harness
         run: ./harness verify
 
-      - name: Upload test evidence
+      - name: Upload harness evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: backend-test-evidence-${{ github.run_id }}
-          if-no-files-found: warn
+          name: backend-harness-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
           retention-days: 14
-          path: |
-            orders-platform/apps/api/target/surefire-reports/**
-            orders-platform/apps/api/target/failsafe-reports/**
-            orders-platform/apps/api/target/quarkus.log
+          path: artifacts/harness/**

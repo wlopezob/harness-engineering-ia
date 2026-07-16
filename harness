@@ -4,6 +4,7 @@ set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 API_DIR="${ROOT_DIR}/orders-platform/apps/api"
+ARTIFACTS_DIR="${ROOT_DIR}/artifacts/harness"
 
 show_usage() {
   cat <<'EOF'
@@ -19,37 +20,163 @@ Commands:
 EOF
 }
 
+copy_test_reports() {
+  local evidence_dir="$1"
+  local reports_dir="${evidence_dir}/test-reports"
+
+  mkdir -p "${reports_dir}"
+
+  if [[ -d "${API_DIR}/target/surefire-reports" ]]; then
+    cp -R \
+      "${API_DIR}/target/surefire-reports" \
+      "${reports_dir}/surefire-reports"
+  fi
+
+  if [[ -d "${API_DIR}/target/failsafe-reports" ]]; then
+    cp -R \
+      "${API_DIR}/target/failsafe-reports" \
+      "${reports_dir}/failsafe-reports"
+  fi
+
+  if [[ -f "${API_DIR}/target/quarkus.log" ]]; then
+    cp \
+      "${API_DIR}/target/quarkus.log" \
+      "${reports_dir}/quarkus.log"
+  fi
+}
+
+write_verification_report() {
+  local evidence_dir="$1"
+  local result="$2"
+  local exit_code="$3"
+  local started_at="$4"
+  local finished_at="$5"
+  local duration_seconds="$6"
+  local commit_sha="$7"
+  local branch="$8"
+
+  cat > "${evidence_dir}/verification.json" <<EOF
+{
+  "schemaVersion": "1.0",
+  "command": "./harness verify",
+  "component": "orders-platform/apps/api",
+  "result": "${result}",
+  "exitCode": ${exit_code},
+  "startedAt": "${started_at}",
+  "finishedAt": "${finished_at}",
+  "durationSeconds": ${duration_seconds},
+  "git": {
+    "commit": "${commit_sha}",
+    "branch": "${branch}"
+  },
+  "environment": {
+    "ci": "${CI:-false}",
+    "githubRunId": "${GITHUB_RUN_ID:-local}",
+    "githubRunAttempt": "${GITHUB_RUN_ATTEMPT:-local}"
+  },
+  "evidence": {
+    "commandLog": "command.log",
+    "testReports": "test-reports"
+  }
+}
+EOF
+}
+
 verify_backend() {
+  local started_at
+  local finished_at
+  local started_epoch
+  local finished_epoch
+  local duration_seconds
+  local timestamp
+  local commit_sha
+  local short_sha
+  local branch
+  local evidence_dir
+  local exit_code
+  local result
+
+  started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  started_epoch="$(date +%s)"
+  timestamp="$(date -u +"%Y%m%dT%H%M%SZ")"
+
+  commit_sha="$(git -C "${ROOT_DIR}" rev-parse HEAD 2>/dev/null || echo "unknown")"
+  short_sha="$(git -C "${ROOT_DIR}" rev-parse --short HEAD 2>/dev/null || echo "unknown")"
+  branch="$(git -C "${ROOT_DIR}" branch --show-current 2>/dev/null || echo "unknown")"
+
+  if [[ -z "${branch}" ]]; then
+    branch="${GITHUB_HEAD_REF:-detached}"
+  fi
+
+  evidence_dir="${ARTIFACTS_DIR}/${timestamp}-${short_sha}"
+  mkdir -p "${evidence_dir}"
+
   echo "=================================================="
   echo " Engineering Harness: backend verification"
   echo "=================================================="
   echo "Repository: ${ROOT_DIR}"
   echo "Backend:    ${API_DIR}"
+  echo "Evidence:   ${evidence_dir}"
   echo
 
   if [[ ! -d "${API_DIR}" ]]; then
-    echo "ERROR: Backend directory not found: ${API_DIR}" >&2
-    exit 2
+    echo "ERROR: Backend directory not found: ${API_DIR}" \
+      | tee "${evidence_dir}/command.log"
+
+    exit_code=2
+  elif [[ ! -f "${API_DIR}/mvnw" ]]; then
+    echo "ERROR: Maven Wrapper not found: ${API_DIR}/mvnw" \
+      | tee "${evidence_dir}/command.log"
+
+    exit_code=2
+  else
+    chmod +x "${API_DIR}/mvnw"
+
+    set +e
+
+    (
+      cd "${API_DIR}"
+
+      ./mvnw \
+        --batch-mode \
+        --no-transfer-progress \
+        clean verify
+    ) 2>&1 | tee "${evidence_dir}/command.log"
+
+    exit_code="${PIPESTATUS[0]}"
+
+    set -e
   fi
 
-  if [[ ! -f "${API_DIR}/mvnw" ]]; then
-    echo "ERROR: Maven Wrapper not found: ${API_DIR}/mvnw" >&2
-    exit 2
+  finished_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  finished_epoch="$(date +%s)"
+  duration_seconds="$((finished_epoch - started_epoch))"
+
+  if [[ "${exit_code}" -eq 0 ]]; then
+    result="PASSED"
+  else
+    result="FAILED"
   fi
 
-  chmod +x "${API_DIR}/mvnw"
+  copy_test_reports "${evidence_dir}"
 
-  cd "${API_DIR}"
-
-  ./mvnw \
-    --batch-mode \
-    --no-transfer-progress \
-    clean verify
+  write_verification_report \
+    "${evidence_dir}" \
+    "${result}" \
+    "${exit_code}" \
+    "${started_at}" \
+    "${finished_at}" \
+    "${duration_seconds}" \
+    "${commit_sha}" \
+    "${branch}"
 
   echo
   echo "=================================================="
-  echo " HARNESS RESULT: PASSED"
+  echo " HARNESS RESULT: ${result}"
+  echo " Evidence: ${evidence_dir}"
   echo "=================================================="
+
+  return "${exit_code}"
 }
 
 COMMAND="${1:-help}"
