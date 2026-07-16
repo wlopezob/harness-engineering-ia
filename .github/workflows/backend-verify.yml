@@ -22,10 +22,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
-    defaults:
-      run:
-        working-directory: orders-platform/apps/api
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -38,11 +34,8 @@ jobs:
           cache: maven
           cache-dependency-path: orders-platform/apps/api/pom.xml
 
-      - name: Grant execute permission to Maven Wrapper
-        run: chmod +x mvnw
-
-      - name: Verify backend harness
-        run: ./mvnw --batch-mode --no-transfer-progress clean verify
+      - name: Verify engineering harness
+        run: ./harness verify
 
       - name: Upload test evidence
         if: always()
