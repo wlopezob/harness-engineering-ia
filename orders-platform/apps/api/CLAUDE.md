@@ -75,3 +75,13 @@ puerto del dominio y mapea `Entity ↔ POJO`.
 - La `@Entity` y `PanacheRepository` NO cruzan fuera de `infrastructure`.
 - Evita `EntityManager`/JPQL a mano salvo lo que Panache no cubra (justificado en
   `DECISIONS.md`).
+
+## HARNESS F — Formato determinista con Spotless
+
+El formato del código no se decide manualmente ni durante la revisión.
+
+Comandos oficiales:
+
+```bash
+./harness format
+./harness verify
