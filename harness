@@ -45,6 +45,18 @@ copy_test_reports() {
       "${API_DIR}/target/quarkus.log" \
       "${reports_dir}/quarkus.log"
   fi
+
+  if [[ -d "${API_DIR}/target/jacoco-reports" ]]; then
+    cp -R \
+      "${API_DIR}/target/jacoco-reports" \
+      "${reports_dir}/jacoco-reports"
+  fi
+
+  if [[ -f "${API_DIR}/target/jacoco-quarkus.exec" ]]; then
+    cp \
+      "${API_DIR}/target/jacoco-quarkus.exec" \
+      "${reports_dir}/jacoco-quarkus.exec"
+  fi
 }
 
 write_verification_report() {
