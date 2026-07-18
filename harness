@@ -12,10 +12,12 @@ Engineering Harness
 
 Usage:
   ./harness verify
+  ./harness format
   ./harness help
 
 Commands:
   verify   Run the complete backend verification harness.
+  format     Corrige el formato
   help     Show this help message.
 EOF
 }
@@ -179,11 +181,41 @@ verify_backend() {
   return "${exit_code}"
 }
 
+format_backend() {
+  echo "=================================================="
+  echo " Engineering Harness: apply formatting"
+  echo "=================================================="
+
+  if [[ ! -f "${API_DIR}/mvnw" ]]; then
+    echo "ERROR: Maven Wrapper not found: ${API_DIR}/mvnw" >&2
+    exit 2
+  fi
+
+  chmod +x "${API_DIR}/mvnw"
+
+  (
+    cd "${API_DIR}"
+
+    ./mvnw \
+      --batch-mode \
+      --no-transfer-progress \
+      spotless:apply
+  )
+
+  echo
+  echo "=================================================="
+  echo " FORMAT RESULT: APPLIED"
+  echo "=================================================="
+}
+
 COMMAND="${1:-help}"
 
 case "${COMMAND}" in
   verify)
     verify_backend
+    ;;
+  format)
+    format_backend
     ;;
   help|--help|-h)
     show_usage

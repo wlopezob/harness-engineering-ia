@@ -8,10 +8,10 @@ import jakarta.ws.rs.ext.Provider;
 @Provider
 public class IllegalArgumentExceptionMapper implements ExceptionMapper<IllegalArgumentException> {
 
-    @Override
-    public Response toResponse(IllegalArgumentException exception) {
-        return Response.status(Response.Status.BAD_REQUEST)
-                .entity(new ApiError(exception.getMessage()))
-                .build();
-    }
+  @Override
+  public Response toResponse(IllegalArgumentException exception) {
+    return Response.status(Response.Status.BAD_REQUEST)
+        .entity(new ApiError(exception.getMessage()))
+        .build();
+  }
 }
