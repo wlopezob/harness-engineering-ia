@@ -85,3 +85,25 @@ Comandos oficiales:
 ```bash
 ./harness format
 ./harness verify
+
+## HARNESS G — Cobertura verificable con JaCoCo
+
+`./harness verify` genera y valida la cobertura de pruebas.
+
+El reporte se genera en:
+
+`target/jacoco-reports/index.html`
+
+Umbrales mínimos vigentes:
+
+- cobertura de líneas: 60 %
+- cobertura de ramas: 40 %
+
+Los umbrales son una línea base, no una meta. No deben reducirse, ni deben
+agregarse exclusiones, únicamente para hacer pasar el build.
+
+Si se necesita cambiar un umbral o excluir una clase, la justificación debe
+registrarse en `DECISIONS.md`.
+
+La cobertura no sustituye pruebas significativas. Los casos de dominio,
+validaciones, errores y bifurcaciones deben probarse por comportamiento.
