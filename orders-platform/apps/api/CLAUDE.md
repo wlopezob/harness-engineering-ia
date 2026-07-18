@@ -96,8 +96,8 @@ El reporte se genera en:
 
 Umbrales mínimos vigentes:
 
-- cobertura de líneas: 60 %
-- cobertura de ramas: 40 %
+- cobertura de líneas: 80 %
+- cobertura de ramas: 80 %
 
 Los umbrales son una línea base, no una meta. No deben reducirse, ni deben
 agregarse exclusiones, únicamente para hacer pasar el build.
