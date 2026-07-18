@@ -165,6 +165,18 @@ if exist "%API_DIR%\target\quarkus.log" (
          "%REPORTS_DIR%\quarkus.log" >nul
 )
 
+if exist "%API_DIR%\target\jacoco-reports" (
+    xcopy "%API_DIR%\target\jacoco-reports" ^
+          "%REPORTS_DIR%\jacoco-reports\" ^
+          /E /I /Y >nul
+)
+
+if exist "%API_DIR%\target\jacoco-quarkus.exec" (
+    copy /Y ^
+         "%API_DIR%\target\jacoco-quarkus.exec" ^
+         "%REPORTS_DIR%\jacoco-quarkus.exec" >nul
+)
+
 exit /b 0
 
 :get_timestamp
