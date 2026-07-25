@@ -13,11 +13,13 @@ Engineering Harness
 Usage:
   ./harness verify
   ./harness format
+  ./harness mutation
   ./harness help
 
 Commands:
   verify   Run the complete backend verification harness.
   format     Corrige el formato
+  mutation Run mutation testing for domain and application.
   help     Show this help message.
 EOF
 }
@@ -56,6 +58,12 @@ copy_test_reports() {
     cp \
       "${API_DIR}/target/jacoco-quarkus.exec" \
       "${reports_dir}/jacoco-quarkus.exec"
+  fi
+
+  if [[ -d "${API_DIR}/target/pit-reports" ]]; then
+    cp -R \
+      "${API_DIR}/target/pit-reports" \
+      "${reports_dir}/pit-reports"
   fi
 }
 
@@ -193,6 +201,43 @@ verify_backend() {
   return "${exit_code}"
 }
 
+mutation_backend() {
+  echo "=================================================="
+  echo " Engineering Harness: mutation testing"
+  echo "=================================================="
+  echo "Repository: ${ROOT_DIR}"
+  echo "Backend:    ${API_DIR}"
+  echo
+
+  if [[ ! -d "${API_DIR}" ]]; then
+    echo "ERROR: Backend directory not found: ${API_DIR}" >&2
+    exit 2
+  fi
+
+  if [[ ! -f "${API_DIR}/mvnw" ]]; then
+    echo "ERROR: Maven Wrapper not found: ${API_DIR}/mvnw" >&2
+    exit 2
+  fi
+
+  chmod +x "${API_DIR}/mvnw"
+
+  (
+    cd "${API_DIR}"
+
+    ./mvnw \
+      --batch-mode \
+      --no-transfer-progress \
+      test-compile \
+      org.pitest:pitest-maven:mutationCoverage
+  )
+
+  echo
+  echo "=================================================="
+  echo " MUTATION RESULT: COMPLETED"
+  echo " Report: ${API_DIR}/target/pit-reports/index.html"
+  echo "=================================================="
+}
+
 format_backend() {
   echo "=================================================="
   echo " Engineering Harness: apply formatting"
@@ -228,6 +273,9 @@ case "${COMMAND}" in
     ;;
   format)
     format_backend
+    ;;
+  mutation)
+    mutation_backend
     ;;
   help|--help|-h)
     show_usage
