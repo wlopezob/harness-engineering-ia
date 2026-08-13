@@ -126,9 +126,23 @@ con `ProductResourceTest` (Postgres real) como red de seguridad.
 patrón que [D-010]). PUT para reemplazar el estado editable; DELETE idempotente
 con 204 sin cuerpo.
 
-### D-010 — ArchUnit gobierna solo producción (DoNotIncludeTests)
+### D-015 — ArchUnit gobierna solo producción (DoNotIncludeTests)
 `@AnalyzeClasses` excluye las clases de test (`importOptions = DoNotIncludeTests`).
 Las reglas de arquitectura aplican al código de producción, no a los tests.
 **Por qué:** la regla `el_nucleo_es_inmutable` (HARNESS C) cazaba campos `@Mock`
 (HARNESS D), que no pueden ser `final`. Choque C×D resuelto de raíz: las reglas no
 deben policiar tests. Libera el `@Mock` en campos idiomático.
+
+## 2026-08-13 — SpotBugs vs. inyección por constructor (HARNESS I)
+
+### D-016 — Excluir EI_EXPOSE_REP2 en `application.usecase`
+`spotbugs-exclude.xml` excluye el patrón `EI_EXPOSE_REP2` para el paquete
+`application.usecase`. SpotBugs marcaba los 5 casos de uso
+(`CreateProductUseCase`, `DeleteProductUseCase`, `GetProductUseCase`,
+`ListProductsUseCase`, `UpdateProductUseCase`) por guardar el `ProductRepository`
+recibido en el constructor.
+**Por qué:** es el patrón de inyección de dependencias prescrito por HARNESS A/D
+(el caso de uso recibe el puerto por constructor); no es una fuga real de estado
+mutable de dominio. HARNESS I exige justificar falsos positivos antes de
+excluirlos — esta es esa justificación. El alcance de la exclusión se limita al
+paquete `application.usecase`, no al proyecto completo.
