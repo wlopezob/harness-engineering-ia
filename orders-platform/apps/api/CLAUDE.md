@@ -107,3 +107,13 @@ registrarse en `DECISIONS.md`.
 
 La cobertura no sustituye pruebas significativas. Los casos de dominio,
 validaciones, errores y bifurcaciones deben probarse por comportamiento.
+
+## HARNESS H — Calidad de tests con PIT
+
+JaCoCo mide ejecución del código. PIT comprueba si los tests detectan cambios
+incorrectos en la lógica.
+
+Comando oficial:
+
+```bash
+./harness mutation
