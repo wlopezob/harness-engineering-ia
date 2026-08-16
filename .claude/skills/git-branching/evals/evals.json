@@ -1,0 +1,50 @@
+{
+  "skill_name": "git-branching",
+  "evals": [
+    {
+      "id": 0,
+      "name": "create-branch-for-issue",
+      "prompt": "Estoy en el repo de orders-service (cwd). Necesito empezar a trabajar en el issue #42: agregar exportación de pedidos a CSV. Crea la rama para eso y déjala publicada en el remoto. No escribas código todavía.",
+      "expected_output": "A new branch created from up-to-date origin/main (after fetch), named following the repo's existing prefix convention (feature/...) with issue id and kebab description, e.g. feature/42-export-orders-csv, pushed with -u; local main untouched.",
+      "files": [],
+      "expectations": [
+        "A new local branch exists whose name matches ^feature/[a-z0-9]+(-[a-z0-9]+)*$ (the repo's existing prefix, not feat/)",
+        "The branch name contains the issue number 42",
+        "The branch name is kebab-case: only lowercase letters, digits, hyphens, and a single slash",
+        "The new branch's tip commit is f024842 (origin/main head), i.e., it was created from the fetched remote main, not from the stale local main a7bac30",
+        "The branch was pushed to origin and its upstream is origin/<same-branch-name> (not origin/main)",
+        "No new commits were added to main (local main still points to a7bac30 or was fast-forwarded to f024842, nothing else)"
+      ]
+    },
+    {
+      "id": 1,
+      "name": "validate-and-fix-branch-name",
+      "prompt": "Estoy en el repo orders-service. Un compañero abrió la rama `Feature/Login_Page/UI` para el rediseño de la página de login. ¿Está bien ese nombre? Si no, dime cuál usar y por qué, en corto.",
+      "expected_output": "Says the name is not OK: uppercase, underscores, and nested slashes; explains the ref-collision issue with nested paths and case-sensitivity problems; proposes something like feature/login-page-ui consistent with the repo's feature/ prefix.",
+      "files": [],
+      "expectations": [
+        "The response says the name is NOT acceptable",
+        "The response points out the uppercase/CamelCase problem",
+        "The response points out the underscore problem (should be hyphens)",
+        "The response points out the extra slash / nested path problem",
+        "The proposed replacement matches ^feature/[a-z0-9]+(-[a-z0-9]+)*$ (uses the repo's existing feature/ prefix)",
+        "The response is written in Spanish"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "enforce-branch-naming",
+      "prompt": "En orders-service quiero que nadie pueda subir ramas con nombres raros: solo feature/, bugfix/, chore/, hotfix/ y release/ seguido de kebab-case. Móntame la validación en el repo (GitHub Actions) y dime qué más debería activar en GitHub.",
+      "expected_output": "Adds a GitHub Actions workflow that validates github.head_ref against a regex allowing exactly those prefixes + kebab-case, and recommends GitHub rulesets: protect main (require PR + status checks, block force push), restrict branch names pattern, auto-delete head branches.",
+      "files": [],
+      "expectations": [
+        "A workflow file exists under .github/workflows/ triggered on pull_request",
+        "The workflow validates the branch name using github.head_ref (not github.ref)",
+        "The regex in the workflow allows exactly the prefixes feature, bugfix, chore, hotfix, release and rejects others",
+        "The regex requires kebab-case after the slash (lowercase, digits, hyphens; no uppercase or underscores)",
+        "The response recommends protecting main with a ruleset/branch protection requiring PRs and status checks",
+        "The response recommends enabling 'Automatically delete head branches' or an equivalent cleanup policy"
+      ]
+    }
+  ]
+}
