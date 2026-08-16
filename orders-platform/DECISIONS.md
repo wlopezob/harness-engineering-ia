@@ -1,6 +1,6 @@
 # DECISIONS
 
-Registro de decisiones. El chat no es la fuente de verdad (D3).
+Registro de decisiones. El chat no es la fuente de verdad (D5 — Artifact Store).
 
 ## 2026-06-29 — Módulo inventory (primera feature)
 
@@ -146,3 +146,32 @@ recibido en el constructor.
 mutable de dominio. HARNESS I exige justificar falsos positivos antes de
 excluirlos — esta es esa justificación. El alcance de la exclusión se limita al
 paquete `application.usecase`, no al proyecto completo.
+
+## 2026-08-16 — Lifecycle de work item externo (github-14)
+
+### D-017 — El harness no integra proveedores de work items
+El Engineering Harness NO conoce GitHub, Jira ni Azure DevOps, y no depende de un
+LLM concreto. Leer el work item externo es una capacidad del **agente** (MCP,
+skills, connectors). El CLI (`./harness`) sigue con `verify`, `format` y
+`mutation`: impone restricciones, ejecuta verificaciones y genera evidencia; no
+obtiene requerimientos. Quedan fuera, por decisión: cliente de API de proveedor,
+`gh issue view` dentro del CLI, flag `--source`, y sincronización automática de
+work items.
+**Por qué:** son dos responsabilidades distintas. Acoplarlas ataría el harness a
+un proveedor y a un modelo, y lo volvería inservible en cualquier repo cuyo
+trabajo se planifique en otra plataforma. La frontera mantiene el harness
+portable. Ver `specs/github-14/plan.md`.
+
+### D-018 — Separación de artefactos: work item = QUÉ, `plan.md` = CÓMO
+El work item externo es la fuente de verdad del **requerimiento** y no se copia
+al repositorio. `specs/<work-item>/plan.md` es la fuente de verdad del **diseño
+técnico** y vive versionado junto al código. Cuando el trabajo nace de una fuente
+externa, `<feature>` usa un identificador trazable (`github-14`, `SUP-123`,
+`ado-45821`) en vez del nombre de dominio. `plan.md` no reemplaza a Jira ni a
+GitHub Issues: no gestiona trabajo, describe estrategia técnica. Un cambio
+trivial puede prescindir de él; lo requieren las tareas con más de un
+comportamiento o con decisiones técnicas.
+**Por qué:** el chat es temporal y el issue vive fuera del repo. Sin el plan
+versionado, el CÓMO no sobrevive a la sesión y el estado del trabajo no puede
+entenderse leyendo el repositorio. El ID trazable cierra el vínculo
+requerimiento ↔ implementación sin duplicar contenido (D1/D2/D5).
