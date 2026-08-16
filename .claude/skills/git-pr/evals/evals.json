@@ -1,0 +1,49 @@
+{
+  "skill_name": "git-pr",
+  "evals": [
+    {
+      "id": 0,
+      "name": "create-pr-from-branch",
+      "prompt": "Estoy en la rama feature/42-export-orders-csv, ya está pusheada con dos commits. Ábreme el PR contra main. Que cierre el issue #42.",
+      "expected_output": "Runs a preflight (rebased on main, CI, commit messages), writes a Conventional-Commit-style title (not the branch name), a body following the repo template with What & why, Closes #42, Changes, How to verify, and creates it with gh pr create (draft if CI pending); does not merge.",
+      "files": [],
+      "expectations": [
+        "A PR is created (gh pr create is invoked or a dry-run body/title is produced if gh is unavailable) targeting main",
+        "The PR title matches ^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\\([a-z0-9._/-]+\\))?!?: .{1,72}$ and is not the branch name",
+        "The PR body contains 'Closes #42' on its own line",
+        "The PR body has a verification section with concrete commands or evidence",
+        "The response mentions the branch was checked against origin/main (rebase/up-to-date) or CI status before opening",
+        "The PR is not merged"
+      ]
+    },
+    {
+      "id": 1,
+      "name": "review-pr-readiness-large-diff",
+      "prompt": "Tengo la rama feature/spotless lista para PR: agregué el plugin de Spotless al pom y corrí el formateo, son 35 archivos. ¿La abro así? Dime qué harías.",
+      "expected_output": "Advises splitting: one small PR (build: add Spotless plugin, a few lines) and a separate formatting-only PR (style: apply Spotless) merged first/second, explains why (reviewability, defect rate, hiding the real change), and gives the git commands to split.",
+      "files": [],
+      "expectations": [
+        "Recommends splitting the plugin addition and the mass reformat into separate PRs (or at least separate commits with a reading-order note)",
+        "Explains the reviewability reason (mechanical changes hide the real change / reviewers skim big diffs)",
+        "Proposes Conventional-Commit-style titles for the resulting PR(s), e.g. build: ... and style: ...",
+        "Gives concrete git commands to perform the split (e.g. reset/soft, add -p, or cherry-pick)",
+        "The response is written in Spanish"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "set-up-pr-policy",
+      "prompt": "Quiero ordenar los PRs de este repo: plantilla de PR, que main solo acepte cambios por PR con el check de Maven en verde, y que las ramas se borren al mergear. Hazlo o dime exactamente qué tocar.",
+      "expected_output": "Adds .github/pull_request_template.md, gives the ruleset config for main (require PR, required status check 'Maven verify', block force push) via UI steps or gh api, and enables auto-delete head branches (setting or gh api), plus recommends picking one merge strategy.",
+      "files": [],
+      "expectations": [
+        "A .github/pull_request_template.md is created with sections for summary/why, changes, how to verify, and reviewer notes",
+        "The response gives a ruleset/branch protection for main requiring a pull request and a required status check",
+        "The required status check named matches an existing job (e.g. 'Maven verify') rather than a made-up name",
+        "The response explains how to enable 'Automatically delete head branches' (UI path or gh api)",
+        "The response recommends choosing a single merge strategy or explains the trade-off",
+        "The response is written in Spanish"
+      ]
+    }
+  ]
+}
