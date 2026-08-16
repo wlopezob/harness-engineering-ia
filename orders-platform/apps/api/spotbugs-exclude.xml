@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+  <!-- HARNESS A/D: los casos de uso reciben el puerto por constructor (DI idiomática).
+       EI_EXPOSE_REP2 marca ese patrón como "exposición de representación interna",
+       pero aquí el campo es la dependencia inyectada, no un objeto de dominio mutable
+       que se filtra por error. Justificado en DECISIONS.md [D-016]. -->
+  <Match>
+    <Package name="com.gentleman.inventory.application.usecase"/>
+    <Bug pattern="EI_EXPOSE_REP2"/>
+  </Match>
+</FindBugsFilter>

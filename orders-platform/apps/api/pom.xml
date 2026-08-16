@@ -18,6 +18,9 @@
     <surefire-plugin.version>3.5.6</surefire-plugin.version>
     <spotless-plugin.version>3.8.0</spotless-plugin.version>
     <jacoco.version>0.8.15</jacoco.version>
+    <pitest-maven.version>1.25.4</pitest-maven.version>
+    <pitest-junit5-plugin.version>1.2.3</pitest-junit5-plugin.version>
+    <spotbugs-maven-plugin.version>4.9.8.1</spotbugs-maven-plugin.version>
   </properties>
 
   <dependencyManagement>
@@ -206,6 +209,45 @@
         </executions>
       </plugin>
       <plugin>
+        <groupId>org.pitest</groupId>
+        <artifactId>pitest-maven</artifactId>
+        <version>${pitest-maven.version}</version>
+
+        <configuration>
+          <targetClasses>
+            <param>com.gentleman.inventory.domain.*</param>
+            <param>com.gentleman.inventory.application.*</param>
+          </targetClasses>
+
+          <targetTests>
+            <param>com.gentleman.inventory.domain.*</param>
+            <param>com.gentleman.inventory.application.*</param>
+          </targetTests>
+
+          <outputFormats>
+            <param>HTML</param>
+            <param>XML</param>
+          </outputFormats>
+
+          <timestampedReports>false</timestampedReports>
+
+          <threads>2</threads>
+
+          <mutationThreshold>80</mutationThreshold>
+          <coverageThreshold>90</coverageThreshold>
+
+          <failWhenNoMutations>true</failWhenNoMutations>
+        </configuration>
+
+        <dependencies>
+          <dependency>
+            <groupId>org.pitest</groupId>
+            <artifactId>pitest-junit5-plugin</artifactId>
+            <version>${pitest-junit5-plugin.version}</version>
+          </dependency>
+        </dependencies>
+      </plugin>
+      <plugin>
         <artifactId>maven-surefire-plugin</artifactId>
         <version>${surefire-plugin.version}</version>
         <configuration>
@@ -238,6 +280,28 @@
               <goal>integration-test</goal>
               <goal>verify</goal>
             </goals>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>com.github.spotbugs</groupId>
+        <artifactId>spotbugs-maven-plugin</artifactId>
+        <version>${spotbugs-maven-plugin.version}</version>
+
+        <configuration>
+          <effort>Max</effort>
+          <threshold>Medium</threshold>
+          <failOnError>true</failOnError>
+          <excludeFilterFile>spotbugs-exclude.xml</excludeFilterFile>
+        </configuration>
+
+        <executions>
+          <execution>
+            <id>spotbugs-check</id>
+            <goals>
+              <goal>check</goal>
+            </goals>
+            <phase>verify</phase>
           </execution>
         </executions>
       </plugin>

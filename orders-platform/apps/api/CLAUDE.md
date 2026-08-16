@@ -85,6 +85,7 @@ Comandos oficiales:
 ```bash
 ./harness format
 ./harness verify
+```
 
 ## HARNESS G — Cobertura verificable con JaCoCo
 
@@ -107,3 +108,33 @@ registrarse en `DECISIONS.md`.
 
 La cobertura no sustituye pruebas significativas. Los casos de dominio,
 validaciones, errores y bifurcaciones deben probarse por comportamiento.
+
+## HARNESS H — Calidad de tests con PIT
+
+JaCoCo mide ejecución del código. PIT comprueba si los tests detectan cambios
+incorrectos en la lógica.
+
+Comando oficial:
+
+```bash
+./harness mutation
+```
+
+## HARNESS I — Análisis estático con SpotBugs
+
+`./harness verify` ejecuta SpotBugs como parte de la fase `verify`.
+
+SpotBugs analiza defectos potenciales que pueden no ser detectados por tests,
+incluyendo:
+
+- posibles null pointer
+- recursos mal manejados
+- valores ignorados
+- errores de concurrencia
+- exposición indebida de estado mutable
+- patrones defectuosos de Java
+
+El build falla ante hallazgos de severidad Medium o superior.
+
+No se deben agregar exclusiones únicamente para hacer pasar el build.
+Los falsos positivos deben justificarse antes de excluirse.
