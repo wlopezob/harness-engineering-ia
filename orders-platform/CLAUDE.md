@@ -57,6 +57,21 @@ Separación de responsabilidades:
 Después de entender el work item, el agente debe comprender el estado técnico
 actual antes de proponer una implementación.
 
+### Working branch
+
+Cuando el work item requiera cambios versionados, el agente trabaja en una
+rama dedicada antes de modificar los artefactos del repositorio.
+
+Para crear y nombrar la rama utiliza el siguiente skill:
+
+`git-branching`
+
+La rama se crea localmente a partir de una base actualizada.
+
+Crear la rama NO implica publicarla.
+
+No se ejecuta `git push` durante esta etapa.
+
 ### Context gathering
 
 Antes de proponer el plan, el agente inspecciona el working copy actual sobre
@@ -207,6 +222,40 @@ No se deben:
 
 Las excepciones o falsos positivos deben tener una justificación técnica
 explícita y quedar registrados cuando corresponda.
+
+### Delivery approval gate
+
+Después de que las verificaciones aplicables estén en verde, el agente realiza
+un self-review del trabajo antes de publicarlo.
+
+Debe revisar, cuando aplique:
+
+- cambios realizados;
+- archivos modificados;
+- cumplimiento del plan aprobado;
+- resultados de las verificaciones;
+- desviaciones del plan;
+- riesgos o pendientes conocidos.
+
+Luego presenta el resultado al usuario y espera confirmación explícita.
+
+Hasta recibir esa confirmación está prohibido ejecutar:
+
+- `git push`;
+- creación de Pull Request;
+- cualquier otra operación que publique el trabajo remoto.
+
+Después de la aprobación:
+
+1. Crear los commits necesarios utilizando el skill:
+   `git-commit`
+
+2. Publicar la rama.
+
+3. Crear el Pull Request utilizando el skill:
+   `git-pr`
+
+El Pull Request debe mantener trazabilidad con el work item cuando exista.
 
 ---
 
