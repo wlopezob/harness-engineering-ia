@@ -1,0 +1,50 @@
+{
+  "skill_name": "git-commit",
+  "evals": [
+    {
+      "id": 0,
+      "name": "commit-mixed-staged-changes",
+      "prompt": "Ya terminé. Tengo cambios sin commitear en el repo: agregué el plugin de Spotless al pom.xml, arreglé un bug en OrderService (las cantidades negativas se aceptaban) con su test, y reformateé tres archivos que no tenían nada que ver. Haz commit de todo, sin push.",
+      "expected_output": "Inspects git status/diff, splits into separate commits (build: spotless plugin; fix(orders): reject negative quantities + test; style: reformat), Conventional Commits subjects in imperative mood, body explaining why, verifies (or explains why not) before committing, does not push.",
+      "files": [],
+      "expectations": [
+        "More than one commit is created (the unrelated changes are not lumped into a single commit)",
+        "The Spotless/pom.xml change is committed with type build (or chore), not feat",
+        "The OrderService bug fix is committed with type fix and its subject describes the behavior (negative quantities), not the file name",
+        "The reformatting-only files are in their own commit (style or chore), separate from the fix",
+        "Every commit subject matches ^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\\([a-z0-9._/-]+\\))?!?: .{1,72}$ and has no trailing period",
+        "Nothing was pushed (no origin/<branch> ref advanced)"
+      ]
+    },
+    {
+      "id": 1,
+      "name": "review-and-rewrite-commit-message",
+      "prompt": "Mira los últimos 5 commits de este repo (git log). ¿Cuáles tienen mensajes malos y por qué? Reescríbeme cada uno como debería haber sido, en corto. No cambies nada en el repo.",
+      "expected_output": "Identifies vague/mislabeled subjects (e.g. 'feat: add soptless' typo + wrong type, 'feat: quarkus-junit-mockito' not a sentence, duplicated subjects as fixup material, missing bodies), proposes rewritten Conventional Commits messages with correct types (build/ci/chore vs feat), imperative mood, and does not modify history.",
+      "files": [],
+      "expectations": [
+        "Flags the typo/vague subject 'feat: add soptless' and proposes a rewrite with type build or chore",
+        "Flags 'feat: quarkus-junit-mockito' as not describing an action/outcome and proposes an imperative rewrite",
+        "Points out that identical consecutive subjects should have been fixup/squashed",
+        "Every proposed subject matches ^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\\([a-z0-9._/-]+\\))?!?: .{1,72}$",
+        "The repo history is not modified (HEAD unchanged, no rebase/amend performed)",
+        "The response is written in Spanish"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "enforce-commit-convention",
+      "prompt": "Quiero que en este repo nadie pueda mergear commits que no sigan Conventional Commits. Configúralo: algo local rápido para el dev y algo en GitHub que sí bloquee. Es un repo Java/Maven, no tenemos Node.",
+      "expected_output": "Adds a commit-msg hook (python or bash regex, no Node dependency) versioned via core.hooksPath or lefthook/pre-commit, adds a GitHub Actions workflow that lints PR commits (or PR title) and explains marking it required in the main ruleset; avoids husky/commitlint-only solutions that need Node, or justifies them.",
+      "files": [],
+      "expectations": [
+        "A local commit-msg hook is added that validates the Conventional Commits pattern without requiring Node.js",
+        "The hook is versioned in the repo (core.hooksPath directory, lefthook, or pre-commit config), not only in .git/hooks",
+        "A GitHub Actions workflow is added that runs on pull_request and validates commit messages or the PR title",
+        "The response explains that the CI check must be marked as a required status check on main (ruleset/branch protection) to actually block merges",
+        "The regex used allows feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert and rejects a subject like 'Added stuff'",
+        "The response is written in Spanish"
+      ]
+    }
+  ]
+}
