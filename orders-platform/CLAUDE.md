@@ -138,8 +138,25 @@ El plan puede contener, según sea necesario:
 
 No todos los apartados son obligatorios por estructura.
 
-El plan debe contener la información necesaria para ejecutar el cambio de forma
-controlada, entendible y verificable.
+El plan debe ser suficientemente detallado para que otro agente pueda
+implementar el cambio sin tener que redescubrir las decisiones técnicas
+principales.
+
+Debe identificar, cuando aplique:
+
+- archivos y componentes a crear o modificar;
+- responsabilidades de cada componente;
+- firmas o interfaces relevantes;
+- flujo entre capas;
+- reglas y algoritmos importantes;
+- impacto de contrato y persistencia;
+- casos de test y su orden.
+
+Puede utilizar pseudocódigo o fragmentos breves cuando ayuden a eliminar
+ambigüedad.
+
+El plan no debe duplicar la implementación final ni contener código completo
+que corresponda vivir en producción.
 
 Si existe una duda que puede cambiar significativamente el comportamiento o la
 arquitectura, el agente no debe inventar la respuesta: debe declararla y
