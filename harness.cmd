@@ -12,9 +12,9 @@ set "API_DIR=%ROOT_DIR%\orders-platform\apps\api"
 set "ARTIFACTS_DIR=%ROOT_DIR%\artifacts\harness"
 
 rem Identidad del codigo verificado (github-26). Debe producir EXACTAMENTE el
-rem mismo valor que ./harness: el orden lo fija git (no el sort del sistema) y
-rem la normalizacion de fin de linea se fija con core.autocrlf=input en vez de
-rem heredar la config de la maquina.
+rem mismo valor que ./harness: el manifiesto se ordena byte a byte (comparacion
+rem ordinal, no el sort del sistema) y la normalizacion de fin de linea se fija
+rem con core.autocrlf=input en vez de heredar la config de la maquina.
 set "SOURCE_STATE_SCOPE=repo:tracked+untracked-not-ignored"
 set "SOURCE_STATE_ALGORITHM=git-hash-object -c core.autocrlf=input (manifest '<blob> <path>': ls-files --cached + --others --exclude-standard, byte-wise path order, LF)"
 set "SOURCE_STATE=unknown"
@@ -23,16 +23,19 @@ set "SOURCE_CHANGED_FILES=0"
 set "SOURCE_MANIFEST_FILE="
 
 if "%~1"=="" goto help
-if /I "%~1"=="help" goto help
-if /I "%~1"=="--help" goto help
-if /I "%~1"=="-h" goto help
-if /I "%~1"=="verify" goto verify
-if /I "%~1"=="format" goto format
-if /I "%~1"=="state" goto state
+if "%~1"=="help" goto help
+if "%~1"=="--help" goto help
+if "%~1"=="-h" goto help
+if "%~1"=="verify" goto verify
+if "%~1"=="format" goto format
+if "%~1"=="mutation" goto mutation
+if "%~1"=="state" goto state
 
-echo ERROR: Unknown harness command: %~1
+rem mismo comportamiento que ./harness: error a stderr, usage completo, exit 2
+echo ERROR: Unknown harness command: %~1 1>&2
 echo.
-goto help_error
+call :print_help
+exit /b 2
 
 :verify
 call :get_timestamp
@@ -234,6 +237,12 @@ if exist "%API_DIR%\target\jacoco-quarkus.exec" (
          "%REPORTS_DIR%\jacoco-quarkus.exec" >nul
 )
 
+if exist "%API_DIR%\target\pit-reports" (
+    xcopy "%API_DIR%\target\pit-reports" ^
+          "%REPORTS_DIR%\pit-reports\" ^
+          /E /I /Y >nul
+)
+
 exit /b 0
 
 :get_timestamp
@@ -272,7 +281,7 @@ echo Backend:    %API_DIR%
 echo.
 
 if not exist "%API_DIR%\mvnw.cmd" (
-    echo ERROR: Maven Wrapper not found: %API_DIR%\mvnw.cmd
+    echo ERROR: Maven Wrapper not found: %API_DIR%\mvnw.cmd 1>&2
     exit /b 2
 )
 
@@ -297,30 +306,73 @@ echo  FORMAT RESULT: APPLIED
 echo ==================================================
 exit /b 0
 
+:mutation
+echo ==================================================
+echo  Engineering Harness: mutation testing
+echo ==================================================
+echo Repository: %ROOT_DIR%
+echo Backend:    %API_DIR%
+echo.
+
+if not exist "%API_DIR%" (
+    echo ERROR: Backend directory not found: %API_DIR% 1>&2
+    exit /b 2
+)
+
+if not exist "%API_DIR%\mvnw.cmd" (
+    echo ERROR: Maven Wrapper not found: %API_DIR%\mvnw.cmd 1>&2
+    exit /b 2
+)
+
+pushd "%API_DIR%"
+
+rem mismo proceso logico que ./harness mutation: compilar tests y lanzar PIT
+call mvnw.cmd --batch-mode --no-transfer-progress test-compile org.pitest:pitest-maven:mutationCoverage
+set "MUTATION_EXIT_CODE=%ERRORLEVEL%"
+
+popd
+
+if not "%MUTATION_EXIT_CODE%"=="0" (
+    echo.
+    echo ==================================================
+    echo  MUTATION RESULT: FAILED
+    echo ==================================================
+    exit /b %MUTATION_EXIT_CODE%
+)
+
+echo.
+echo ==================================================
+echo  MUTATION RESULT: COMPLETED
+echo  Report: %API_DIR%\target\pit-reports\index.html
+echo ==================================================
+exit /b 0
+
 :help
+call :print_help
+exit /b 0
+
+rem Mismo texto que show_usage en ./harness (modulo el nombre del programa):
+rem tests/harness/parity_test.sh compara los dos.
+:print_help
 echo Engineering Harness
 echo.
 echo Usage:
 echo   harness.cmd verify
 echo   harness.cmd format
+echo   harness.cmd mutation
 echo   harness.cmd state
 echo   harness.cmd help
 echo.
 echo Commands:
 echo   verify   Run the complete backend verification harness.
-echo   format   Apply the repository formatting rules.
+echo   format   Apply the repository formatting rules ^(spotless:apply^).
+echo   mutation Run mutation testing for domain and application.
 echo   state    Print the identity of the source state that would be verified.
-echo            Use `state --manifest ^<path^>` to also dump the manifest
-echo            ^(write it outside the repo: inside, it becomes a new
-echo            untracked file and changes the next state^).
+echo            Use `state --manifest ^<path^>` to also dump the manifest behind it
+echo            ^(write it outside the repo: inside, it becomes a new untracked
+echo            file and changes the next state^).
 echo   help     Show this help message.
 exit /b 0
-
-:help_error
-echo Usage:
-echo   harness.cmd verify
-echo   harness.cmd help
-exit /b 2
 
 :compute_source_state
 set "SOURCE_STATE=unknown"
