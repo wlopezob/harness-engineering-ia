@@ -288,3 +288,61 @@ contrato (D6) pero **no hay consumidores** (`apps/` solo contiene `api`): es el
 momento más barato para cerrarlo. Matiza [D-014], que estableció `PUT`
 name+quantity. Si más adelante hace falta fijar un valor absoluto auditado, se
 agrega de forma aditiva al recurso de ajustes (`{"targetQuantity": n}`).
+
+## 2026-08-17 — Identidad del código verificado (github-26)
+
+### D-026 — La evidencia identifica el estado exacto verificado, no solo `HEAD`
+`./harness verify` registraba el commit `HEAD` aunque hubiera cambios sin
+commit, así que una evidencia podía parecer que correspondía a un commit limpio
+cuando se había verificado otra cosa. Ahora el harness calcula, **antes de
+ejecutar Maven**, un identificador determinista del árbol:
+
+```
+manifiesto = "<git-hash-object del contenido en disco> <path>" por archivo,
+             ls-files --cached (deduplicado) + --others --exclude-standard,
+             ordenados TODOS juntos byte a byte por path
+state      = git hash-object --stdin < manifiesto
+```
+
+El orden es **global**, no por grupos: git lista primero los tracked y luego los
+untracked, así que agrupar hacía que un `git add` sobre un archivo sin modificar
+cambiara el identificador — describía el índice, no el contenido. `LC_ALL=C` en
+bash y el `StringComparer` ordinal de .NET en `harness.cmd`, porque el
+`sort.exe` de Windows ordena según el locale.
+
+`verification.json` sube a `schemaVersion 1.1` y añade un bloque `source` con
+`dirty`, `state`, `stateAlgorithm`, `scope`, `changedFiles` y `manifest`; el
+manifiesto se guarda como evidencia (`source-state.txt`), de modo que el
+identificador es **auditable y recomputable** con un solo comando de git. Con
+cambios locales, el directorio pasa a llamarse
+`<timestamp>-<sha>-dirty-<state7>` y la consola lo avisa al principio y al
+final. Alcance: todo el árbol versionable (tracked + untracked no ignorados);
+`artifacts/` y `target/` están en `.gitignore`, así que lo que genera la propia
+verificación no altera la identidad.
+
+**Por qué `git hash-object` y no `sha256sum`:** no escribe nada en el
+repositorio (verificado: 555 objetos antes y después), git ya es un requisito
+del harness — `sha256sum` no existe en macOS y en Windows haría falta
+`certutil`/PowerShell — y sabe normalizar los finales de línea. Esa
+normalización hay que **fijarla** con `-c core.autocrlf=input`: por defecto cada
+máquina aplica su propia config, y para archivos que git guarda con CRLF (los
+`mvnw.cmd` del repo) Linux hashea el CRLF tal cual mientras Windows lo convierte
+a LF. Lo destapó el job de paridad: 2 de 122 líneas del manifiesto diferían. **Por qué
+un sort explícito y no el orden que emite git:** git lista cada grupo en orden
+byte-wise, pero primero los tracked y después los untracked, así que ese orden
+depende del índice — un `git add` lo alteraba. El orden se impone sobre todos
+los paths juntos, y como el `sort.exe` de Windows ordena según el locale, la
+comparación byte a byte se fija en cada implementación (`LC_ALL=C sort` en bash,
+`StringComparer` ordinal de .NET en `harness.cmd`). Descartados: `git stash create` (no incluye untracked) y el índice temporal con
+`write-tree` (identificador canónico y más rápido, pero **escribe blobs** en
+`.git/objects`).
+
+La paridad entre `./harness` y `harness.cmd` **se mide**: el workflow
+`harness-selftest.yml` calcula el `state` en `ubuntu-latest` y en
+`windows-latest` y falla si difieren. Fue la primera ejecución real de
+`harness.cmd` y destapó cuatro defectos (barra final en `ROOT_DIR`, manifiesto
+que contaminaba su propio cálculo, normalización de fin de línea sin fijar y
+orden dependiente del índice); hoy está en verde. Se estrena `tests/` con
+`tests/harness/state_test.sh` (bash plano, sin dependencias nuevas) y el
+subcomando `./harness state`, que era la única forma de tener un RED antes del
+código sin esperar a Maven. Ver `specs/github-26/plan.md`.

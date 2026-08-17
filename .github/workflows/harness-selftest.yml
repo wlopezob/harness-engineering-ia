@@ -1,0 +1,147 @@
+name: Harness Self-Test
+
+on:
+  pull_request:
+    branches:
+      - main
+
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: harness-selftest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  self-test:
+    name: Source state self-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run harness self-test
+        run: tests/harness/state_test.sh
+
+  state-linux:
+    name: Source state (bash)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      state: ${{ steps.compute.outputs.state }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Compute source state
+        id: compute
+        run: |
+          # el manifiesto se vuelca FUERA del repo: dentro seria un untracked
+          # nuevo y contaminaria el siguiente calculo. Una sola invocacion, para
+          # que el state publicado sea el que respalda ese manifiesto.
+          output="$(./harness state --manifest "${RUNNER_TEMP}/manifest.txt")"
+          echo "${output}"
+          state="$(printf '%s\n' "${output}" | sed -n 's/.*"state": "\([0-9a-f]*\)".*/\1/p')"
+
+          if [ -z "${state}" ]; then
+            echo "ERROR: ./harness state no devolvió un identificador usable" >&2
+            exit 1
+          fi
+
+          echo "state=${state}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest-linux
+          path: ${{ runner.temp }}/manifest.txt
+
+  state-windows:
+    name: Source state (cmd)
+    runs-on: windows-latest
+    timeout-minutes: 10
+    outputs:
+      state: ${{ steps.compute.outputs.state }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Compute source state
+        id: compute
+        shell: pwsh
+        run: |
+          # fuera del repo, por el mismo motivo que en el job de bash
+          $output = & cmd /c harness.cmd state --manifest "$env:RUNNER_TEMP\manifest.txt"
+          $output
+          $state = ([regex]::Match(($output -join "`n"), '"state": "([0-9a-f]+)"')).Groups[1].Value
+
+          if (-not $state) {
+            Write-Error "harness.cmd state no devolvió un identificador usable (¿git no encontró el repositorio?)"
+            exit 1
+          }
+
+          "state=$state" >> $env:GITHUB_OUTPUT
+
+      - name: Upload manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest-windows
+          path: ${{ runner.temp }}/manifest.txt
+
+  parity:
+    name: bash and cmd agree on the state
+    needs: [state-linux, state-windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Download linux manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: manifest-linux
+          path: linux
+
+      - name: Download windows manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: manifest-windows
+          path: windows
+
+      # El checkout de Windows convierte a CRLF; git hash-object normaliza a LF,
+      # así que el mismo código debe producir el mismo identificador en ambos.
+      - name: Compare identifiers
+        run: |
+          linux='${{ needs.state-linux.outputs.state }}'
+          windows='${{ needs.state-windows.outputs.state }}'
+          echo "bash (linux): ${linux}"
+          echo "cmd (windows): ${windows}"
+
+          if [ -z "${linux}" ] || [ -z "${windows}" ]; then
+            echo "ERROR: alguna implementación no devolvió un state" >&2
+            exit 1
+          fi
+
+          if [ "${linux}" != "${windows}" ]; then
+            echo "ERROR: ./harness y harness.cmd identifican el mismo código de forma distinta" >&2
+            echo "--- diff de los manifiestos (izquierda=linux, derecha=windows):" >&2
+            diff <(tr -d '\r' < linux/manifest.txt) <(tr -d '\r' < windows/manifest.txt) \
+              | head -40 >&2 || true
+            echo "--- ¿solo difieren los finales de línea?" >&2
+            if diff -q <(tr -d '\r' < linux/manifest.txt) \
+                       <(tr -d '\r' < windows/manifest.txt) >/dev/null; then
+              echo "SÍ: el contenido coincide; el hash difiere por CRLF sin normalizar" >&2
+            else
+              echo "NO: el contenido del manifiesto difiere de verdad" >&2
+            fi
+            exit 1
+          fi
+
+          echo "OK: ambas implementaciones coinciden"
