@@ -309,15 +309,37 @@ que le corresponde.
   `[self-test, state-linux, state-windows, parity, gate]`, y
   `gate.needs = [self-test, state-linux, state-windows, parity]`.
 
-### Verificación en GitHub (pendiente del push, tras aprobación)
+### Verificación en GitHub (PR #29, tras la aprobación de entrega)
 
-Se completa en este mismo documento cuando el PR exista: corrida con los 5
-jobs, `gh pr checks` con `Harness self-test` como required, y el ruleset con
-los tres contextos.
+* Run `32078701576` del workflow `Harness Self-Test` sobre el PR: **5 jobs en
+  success** — `Source state self-test` (6 s; ejecuta las dos suites:
+  `15 passed, 0 failed, 1 skipped` la de state, porque el runner no tiene el
+  locale alternativo, y `10 passed, 0 failed, 0 skipped` la del gate),
+  `Source state (bash)`, `Source state (cmd)`, `bash and cmd agree on the
+  state` y `Harness self-test` (5 s, incluido el checkout sparse). El gate
+  imprimió la tabla con los cuatro `success` y `OK: todos los jobs
+  requeridos terminaron en success`.
+* Ruleset `main` (`18865557`) actualizado con `PUT` a las 18:04 (-05:00) del
+  2026-08-17, **con el gate ya en verde en el PR y antes del merge**.
+  Contextos obligatorios: `Maven verify`, `Dependency review`,
+  `Harness self-test` (los tres con `integration_id 15368`); `strict` y
+  `do_not_enforce_on_create` siguen en `true`, `bypass_actors` sigue vacío y
+  las reglas `deletion`, `non_fast_forward` y `pull_request` no cambian.
+* En el PR #29, `statusCheckRollup` marca `Harness self-test: SUCCESS
+  required=true` (junto a `Maven verify` y `Dependency review`); el resto de
+  checks del workflow y CodeQL siguen `required=false`. `mergeStateStatus:
+  CLEAN`. Este PR es el primero que pasa por el gate.
+
+Comando para releer el ruleset en cualquier momento:
+
+```bash
+gh api repos/wlopezob/harness-engineering-ia/rulesets/18865557 --jq \
+  '.rules[] | select(.type=="required_status_checks") | .parameters.required_status_checks[].context'
+```
 
 ## Desviaciones respecto al plan
 
 1. El checkout del gate usa el modo cono por defecto de `sparse-checkout`
    (basta para traer un directorio); el plan no lo detallaba.
-2. Ninguna otra hasta aquí: el nombre, el script, la suite, el runner
-   compartido y el orden de los casos son los del plan.
+2. Ninguna otra: el nombre, el script, la suite, el runner compartido, el
+   orden de los casos y el momento de tocar el ruleset son los del plan.
