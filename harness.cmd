@@ -423,7 +423,10 @@ rem core.autocrlf=input normaliza el manifiesto a LF antes de hashear, para que
 rem Windows y macOS produzcan el mismo state con el mismo codigo
 for /f "delims=" %%H in ('git -c core.autocrlf^=input hash-object -- "%MANIFEST_FILE%"') do set "SOURCE_STATE=%%H"
 
-for /f %%C in ('git status --porcelain --untracked-files^=all ^| find /c /v ""') do set "SOURCE_CHANGED_FILES=%%C"
+rem find.exe con ruta absoluta: bajo Git Bash el PATH pone usr\bin delante y
+rem `find` es el GNU find, que toma /c como el directorio C:\ y recorre el disco
+rem entero (lo cazo la suite de contrato en windows-latest: verify colgado).
+for /f %%C in ('git status --porcelain --untracked-files^=all ^| "%SystemRoot%\System32\find.exe" /c /v ""') do set "SOURCE_CHANGED_FILES=%%C"
 
 popd
 
