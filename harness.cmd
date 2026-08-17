@@ -309,7 +309,9 @@ echo Commands:
 echo   verify   Run the complete backend verification harness.
 echo   format   Apply the repository formatting rules.
 echo   state    Print the identity of the source state that would be verified.
-echo            Use `state --manifest ^<path^>` to also dump the manifest.
+echo            Use `state --manifest ^<path^>` to also dump the manifest
+echo            ^(write it outside the repo: inside, it becomes a new
+echo            untracked file and changes the next state^).
 echo   help     Show this help message.
 exit /b 0
 

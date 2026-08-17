@@ -32,7 +32,9 @@ Commands:
   format     Corrige el formato
   mutation Run mutation testing for domain and application.
   state    Print the identity of the source state that would be verified.
-           Use `state --manifest <path>` to also dump the manifest behind it.
+           Use `state --manifest <path>` to also dump the manifest behind it
+           (write it outside the repo: inside, it becomes a new untracked
+           file and changes the next state).
   help     Show this help message.
 EOF
 }

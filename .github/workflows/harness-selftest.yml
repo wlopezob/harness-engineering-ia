@@ -43,8 +43,12 @@ jobs:
       - name: Compute source state
         id: compute
         run: |
-          ./harness state --manifest manifest.txt
-          state="$(./harness state | sed -n 's/.*"state": "\([0-9a-f]*\)".*/\1/p')"
+          # el manifiesto se vuelca FUERA del repo: dentro seria un untracked
+          # nuevo y contaminaria el siguiente calculo. Una sola invocacion, para
+          # que el state publicado sea el que respalda ese manifiesto.
+          output="$(./harness state --manifest "${RUNNER_TEMP}/manifest.txt")"
+          echo "${output}"
+          state="$(printf '%s\n' "${output}" | sed -n 's/.*"state": "\([0-9a-f]*\)".*/\1/p')"
 
           if [ -z "${state}" ]; then
             echo "ERROR: ./harness state no devolvió un identificador usable" >&2
@@ -57,7 +61,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: manifest-linux
-          path: manifest.txt
+          path: ${{ runner.temp }}/manifest.txt
 
   state-windows:
     name: Source state (cmd)
@@ -74,7 +78,8 @@ jobs:
         id: compute
         shell: pwsh
         run: |
-          $output = & cmd /c harness.cmd state --manifest manifest.txt
+          # fuera del repo, por el mismo motivo que en el job de bash
+          $output = & cmd /c harness.cmd state --manifest "$env:RUNNER_TEMP\manifest.txt"
           $output
           $state = ([regex]::Match(($output -join "`n"), '"state": "([0-9a-f]+)"')).Groups[1].Value
 
@@ -89,7 +94,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: manifest-windows
-          path: manifest.txt
+          path: ${{ runner.temp }}/manifest.txt
 
   parity:
     name: bash and cmd agree on the state
