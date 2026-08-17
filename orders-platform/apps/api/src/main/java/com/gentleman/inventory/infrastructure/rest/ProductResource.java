@@ -5,6 +5,7 @@ import com.gentleman.inventory.application.usecase.CreateProductUseCase;
 import com.gentleman.inventory.application.usecase.DeleteProductUseCase;
 import com.gentleman.inventory.application.usecase.GetProductUseCase;
 import com.gentleman.inventory.application.usecase.ListProductsUseCase;
+import com.gentleman.inventory.application.usecase.ListStockMovementsUseCase;
 import com.gentleman.inventory.application.usecase.UpdateProductUseCase;
 import com.gentleman.inventory.domain.model.Product;
 import jakarta.ws.rs.Consumes;
@@ -40,6 +41,7 @@ public class ProductResource {
   private final UpdateProductUseCase updateProduct;
   private final DeleteProductUseCase deleteProduct;
   private final AdjustStockUseCase adjustStock;
+  private final ListStockMovementsUseCase listStockMovements;
 
   public ProductResource(
       CreateProductUseCase createProduct,
@@ -47,13 +49,15 @@ public class ProductResource {
       GetProductUseCase getProduct,
       UpdateProductUseCase updateProduct,
       DeleteProductUseCase deleteProduct,
-      AdjustStockUseCase adjustStock) {
+      AdjustStockUseCase adjustStock,
+      ListStockMovementsUseCase listStockMovements) {
     this.createProduct = createProduct;
     this.listProducts = listProducts;
     this.getProduct = getProduct;
     this.updateProduct = updateProduct;
     this.deleteProduct = deleteProduct;
     this.adjustStock = adjustStock;
+    this.listStockMovements = listStockMovements;
   }
 
   @POST
@@ -189,6 +193,31 @@ public class ProductResource {
   })
   public ProductResponse adjustStock(@PathParam("id") Long id, StockAdjustmentRequest request) {
     return ProductResponse.from(adjustStock.handle(id, request.delta()));
+  }
+
+  @GET
+  @Path("/{id}/stock-movements")
+  @APIResponses({
+    @APIResponse(
+        responseCode = "200",
+        description = "Historial de movimientos de stock, del más reciente al más antiguo",
+        content =
+            @Content(
+                mediaType = MediaType.APPLICATION_JSON,
+                schema =
+                    @Schema(
+                        type = SchemaType.ARRAY,
+                        implementation = StockMovementResponse.class))),
+    @APIResponse(
+        responseCode = "404",
+        description = "No existe un producto con ese id",
+        content =
+            @Content(
+                mediaType = MediaType.APPLICATION_JSON,
+                schema = @Schema(implementation = ApiError.class)))
+  })
+  public List<StockMovementResponse> stockMovements(@PathParam("id") Long id) {
+    return listStockMovements.handle(id).stream().map(StockMovementResponse::from).toList();
   }
 
   @DELETE

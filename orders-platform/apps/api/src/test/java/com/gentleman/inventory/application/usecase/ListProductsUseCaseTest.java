@@ -6,6 +6,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.gentleman.inventory.domain.model.Product;
+import com.gentleman.inventory.domain.model.ProductStatus;
 import com.gentleman.inventory.domain.port.ProductRepository;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -31,8 +32,8 @@ class ListProductsUseCaseTest {
     ListProductsUseCase useCase = new ListProductsUseCase(repository);
     List<Product> stored =
         List.of(
-            Product.restore(1L, "Teclado", "KEY-001", 10),
-            Product.restore(2L, "Mouse", "MOU-002", 5));
+            Product.restore(1L, "Teclado", "KEY-001", 10, ProductStatus.ACTIVE),
+            Product.restore(2L, "Mouse", "MOU-002", 5, ProductStatus.ACTIVE));
     when(repository.findAll()).thenReturn(stored);
 
     List<Product> result = useCase.handle();
