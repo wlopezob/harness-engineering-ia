@@ -131,7 +131,7 @@ Solo se **añaden** campos; ningún consumidor actual se rompe (1.1, no 2.0):
   "source": {
     "dirty": true,
     "state": "9f2c1d4…",
-    "stateAlgorithm": "git-hash-object(manifest: '<blob> <path>' LC_ALL=C sorted, LF)",
+    "stateAlgorithm": "git-hash-object -c core.autocrlf=input (manifest '<blob> <path>': ls-files --cached + --others --exclude-standard, byte-wise path order, LF)",
     "scope": "repo:tracked+untracked-not-ignored",
     "changedFiles": 3,
     "manifest": "source-state.txt"
@@ -303,7 +303,9 @@ local produce un `state` distinto y un directorio marcado como sucio.
   declarar el árbol sucio`, `el nombre del directorio no puede parecer una
   verificación del commit limpio`, `la consola debe avisar de los cambios
   locales`…).
-* Suite final: **16/16 en verde**.
+* Suite final: **16 passed, 0 failed, 0 skipped**. El runner cuenta los tests
+  omitidos aparte: el caso del locale se salta si la máquina no tiene el locale
+  alternativo, y contarlo como "passed" prometería una cobertura que no hubo.
 
 ### Pruebas de mutación sobre la implementación
 
@@ -333,7 +335,8 @@ Dos correcciones que salieron de ahí:
 
 ### Verificación (D4)
 
-* `tests/harness/state_test.sh` → **PASSED (16/16)**.
+* `tests/harness/state_test.sh` → `SELF-TEST RESULT: PASSED - 16 passed,
+  0 failed, 0 skipped (16 tests, 0 assertion failure(s))`.
 * `./harness verify` con el árbol sucio → `HARNESS RESULT: PASSED`, 65 tests
   (el flujo actual sigue compatible). Evidencia:
   `artifacts/harness/20260817T182309Z-18ec5a4-dirty-d4589d4/`.
@@ -395,13 +398,17 @@ real, no ruido:
 
 ## Desviaciones respecto al plan
 
-1. **El orden ya no lo da `LC_ALL=C sort`, lo da git.** El plan asumía un sort
-   explícito; al escribir la paridad se vio que el `sort` de Windows ordena
-   según el locale (no byte-wise), lo que produciría identificadores distintos
-   para el mismo código. Se comprobó que `git ls-files` emite **cada grupo** en
-   orden byte-wise (mismo código en toda plataforma) y el manifiesto pasó a ser
-   `--cached` seguido de `--others`, sin sort. Efecto lateral: se eliminó la
-   dependencia del locale y de PowerShell.
+1. **El orden pasó por dos iteraciones y volvió al sort explícito.** El plan
+   asumía `LC_ALL=C sort`; al escribir la paridad se descartó porque el
+   `sort.exe` de Windows ordena según el locale, y se probó a delegar el orden
+   en git (`--cached` seguido de `--others`, cada grupo ya byte-wise). Eso
+   resultó **incorrecto**: agrupar por estado del índice hacía que un `git add`
+   cambiara el identificador (ver punto 4 de "Lo que encontró el CI"). El
+   manifiesto ordena ahora **todos** los paths juntos byte a byte, con la
+   comparación fijada en cada implementación: `LC_ALL=C sort` en bash y el
+   `StringComparer` ordinal de .NET en `harness.cmd`. Es decir: sí hay sort
+   explícito, y la paridad se sostiene porque ninguna de las dos
+   implementaciones hereda la collation del entorno.
 2. **La paridad se mide, no se declara.** El plan la dejaba "por inspección"
    porque no hay Windows ni PowerShell en el entorno de desarrollo. En su lugar
    se añadió el workflow `harness-selftest.yml` con un job **`windows-latest`

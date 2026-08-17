@@ -10,7 +10,12 @@ REPO_ROOT="$(cd "${TESTS_DIR}/../.." && pwd)"
 HARNESS_UNDER_TEST="${REPO_ROOT}/harness"
 
 TESTS_RUN=0
+TESTS_PASSED=0
 TESTS_FAILED=0
+TESTS_SKIPPED=0
+
+# aserciones fallidas: un test puede acumular varias, pero cuenta como uno solo
+ASSERT_FAILURES=0
 
 # Raíz única de temporales: new_repo corre en una subshell (sustitución de
 # comandos), así que no puede poblar un array del shell padre.
@@ -23,8 +28,15 @@ cleanup() {
 trap cleanup EXIT
 
 fail() {
-  TESTS_FAILED=$((TESTS_FAILED + 1))
+  ASSERT_FAILURES=$((ASSERT_FAILURES + 1))
   echo "  FAIL: $1"
+}
+
+# Un test omitido no es un test que pasa: se cuenta aparte para que el resumen
+# no prometa cobertura que no hubo.
+skip() {
+  TESTS_SKIPPED=$((TESTS_SKIPPED + 1))
+  echo "  SKIP: $1"
 }
 
 assert_equals() {
@@ -50,9 +62,18 @@ assert_not_empty() {
 
 run_test() {
   local name="$1"
+  local failures_before="${ASSERT_FAILURES}"
+  local skipped_before="${TESTS_SKIPPED}"
+
   TESTS_RUN=$((TESTS_RUN + 1))
   echo "- ${name}"
   "${name}"
+
+  if [[ "${ASSERT_FAILURES}" -gt "${failures_before}" ]]; then
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+  elif [[ "${TESTS_SKIPPED}" -eq "${skipped_before}" ]]; then
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+  fi
 }
 
 # Crea un repo git temporal con el harness bajo prueba y un commit inicial.
@@ -390,7 +411,7 @@ test_el_state_no_depende_del_locale_de_quien_lo_ejecuta() {
   # sin `grep -q`: con pipefail, grep cerraria el pipe, `locale` moriria de
   # SIGPIPE y el pipeline se daria por fallido, omitiendo el test en silencio
   if ! locale -a 2>/dev/null | grep -ix "${otro_locale}" > /dev/null; then
-    echo "    (omitido: ${otro_locale} no disponible en esta maquina)"
+    skip "${otro_locale} no esta disponible en esta maquina"
     return
   fi
 
@@ -423,8 +444,12 @@ run_test test_el_state_no_cambia_al_indexar_un_archivo_sin_tocarlo
 run_test test_el_state_no_depende_del_locale_de_quien_lo_ejecuta
 
 echo
+SUMMARY="${TESTS_PASSED} passed, ${TESTS_FAILED} failed, ${TESTS_SKIPPED} skipped"
+SUMMARY="${SUMMARY} (${TESTS_RUN} tests, ${ASSERT_FAILURES} assertion failure(s))"
+
 if [[ "${TESTS_FAILED}" -gt 0 ]]; then
-  echo "SELF-TEST RESULT: FAILED (${TESTS_FAILED}/${TESTS_RUN})"
+  echo "SELF-TEST RESULT: FAILED - ${SUMMARY}"
   exit 1
 fi
-echo "SELF-TEST RESULT: PASSED (${TESTS_RUN}/${TESTS_RUN})"
+
+echo "SELF-TEST RESULT: PASSED - ${SUMMARY}"
