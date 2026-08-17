@@ -92,7 +92,9 @@ run_harness() {
   HARNESS_RC=0
   case "${HARNESS_IMPL}" in
     bash) HARNESS_OUT="$( cd "${dir}" && ./harness "$@" 2>&1 )" || HARNESS_RC=$? ;;
-    cmd)  HARNESS_OUT="$( cd "${dir}" && cmd //c harness.cmd "$@" 2>&1 )" || HARNESS_RC=$? ;;
+    # timeout: un cuelgue de harness.cmd tiene que ser un FAIL (rc 124), no
+    # un job de CI que muere por su propio timeout sin decir en qué test
+    cmd)  HARNESS_OUT="$( cd "${dir}" && timeout 120 cmd //c harness.cmd "$@" 2>&1 )" || HARNESS_RC=$? ;;
   esac
   HARNESS_OUT="${HARNESS_OUT//$'\r'/}"
 }
@@ -104,9 +106,6 @@ mvnw_args_of() {
   tr -d '\r' < "${file}" | sed 's/[[:space:]]*$//'
 }
 
-evidence_dir_of() {
-  find "$1/artifacts/harness" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -1
-}
 
 # --- help / desconocido ------------------------------------------------------
 
