@@ -299,9 +299,16 @@ ejecutar Maven**, un identificador determinista del árbol:
 
 ```
 manifiesto = "<git-hash-object del contenido en disco> <path>" por archivo,
-             ls-files --cached (deduplicado) y luego --others --exclude-standard
+             ls-files --cached (deduplicado) + --others --exclude-standard,
+             ordenados TODOS juntos byte a byte por path
 state      = git hash-object --stdin < manifiesto
 ```
+
+El orden es **global**, no por grupos: git lista primero los tracked y luego los
+untracked, así que agrupar hacía que un `git add` sobre un archivo sin modificar
+cambiara el identificador — describía el índice, no el contenido. `LC_ALL=C` en
+bash y el `StringComparer` ordinal de .NET en `harness.cmd`, porque el
+`sort.exe` de Windows ordena según el locale.
 
 `verification.json` sube a `schemaVersion 1.1` y añade un bloque `source` con
 `dirty`, `state`, `stateAlgorithm`, `scope`, `changedFiles` y `manifest`; el
@@ -330,7 +337,10 @@ Descartados: `git stash create` (no incluye untracked) y el índice temporal con
 
 La paridad entre `./harness` y `harness.cmd` **se mide**: el workflow
 `harness-selftest.yml` calcula el `state` en `ubuntu-latest` y en
-`windows-latest` y falla si difieren. Se estrena `tests/` con
+`windows-latest` y falla si difieren. Fue la primera ejecución real de
+`harness.cmd` y destapó cuatro defectos (barra final en `ROOT_DIR`, manifiesto
+que contaminaba su propio cálculo, normalización de fin de línea sin fijar y
+orden dependiente del índice); hoy está en verde. Se estrena `tests/` con
 `tests/harness/state_test.sh` (bash plano, sin dependencias nuevas) y el
 subcomando `./harness state`, que era la única forma de tener un RED antes del
 código sin esperar a Maven. Ver `specs/github-26/plan.md`.

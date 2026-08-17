@@ -186,10 +186,12 @@ verify` (minutos) para comprobar un hash.
 * Se añade al CI un paso `Harness self-test` que ejecuta esa suite. No toca las
   reglas de JaCoCo/SpotBugs/PIT ni los tests del backend (fuera de alcance del
   issue).
-* **Limitación declarada:** la suite corre `./harness` (bash). `harness.cmd` no
-  se puede ejecutar desde macOS/Linux, así que su paridad se revisa por
-  inspección y queda como deuda visible (un job Windows en CI sería el arreglo
-  real; fuera de alcance aquí).
+* **Paridad de `harness.cmd`:** la suite bash no puede ejecutarlo desde
+  macOS/Linux. En vez de dejarlo "revisado por inspección", el workflow incluye
+  un job `windows-latest` que lo ejecuta de verdad y compara su identificador
+  con el de bash (ver "Lo que encontró el CI"). La suite sí comprueba la
+  **paridad declarada**: mismo `stateAlgorithm`, mismo `scope` y mismos
+  comandos git en ambos scripts.
 
 ## Cambios propuestos
 
@@ -259,6 +261,23 @@ Todos sobre `tests/harness/state_test.sh`, cada uno en un repo git temporal.
 11. Con árbol sucio, el directorio de evidencia termina en `-dirty-<state7>` y
     la consola imprime el aviso.
 
+Casos añadidos durante la implementación (los 5 que faltaban hasta los 16 de la
+suite final; cada uno nació de un fallo real, no de la lista previa):
+
+12. **Paridad declarada:** ambos scripts declaran el mismo `stateAlgorithm` y
+    el mismo `scope`, usan los mismos comandos git y `harness.cmd` normaliza
+    `ROOT_DIR` (sin esa normalización, `git -C "C:\ruta\"` deja a git sin
+    directorio — lo cazó el job Windows).
+13. `state --manifest <ruta>` vuelca el manifiesto y el `state` publicado se
+    reproduce hasheándolo. Nació de necesitar diagnosticar por qué bash y cmd
+    discrepaban.
+14. **CRLF y LF del mismo contenido dan el mismo `state`** — reproduce en local
+    el fallo que destapó el job Windows con los `mvnw.cmd`.
+15. **`git add` sobre un archivo no modificado no cambia el `state`** (archivo
+    untracked cuyo path cae entre dos tracked). Detectado en review del PR.
+16. **El `state` no depende del locale** de quien ejecuta (nombres que exponen
+    la collation).
+
 ## Verificación (D4)
 
 ```bash
@@ -284,7 +303,7 @@ local produce un `state` distinto y un directorio marcado como sucio.
   declarar el árbol sucio`, `el nombre del directorio no puede parecer una
   verificación del commit limpio`, `la consola debe avisar de los cambios
   locales`…).
-* Suite final: **12/12 en verde**.
+* Suite final: **16/16 en verde**.
 
 ### Pruebas de mutación sobre la implementación
 
@@ -314,10 +333,10 @@ Dos correcciones que salieron de ahí:
 
 ### Verificación (D4)
 
-* `tests/harness/state_test.sh` → **PASSED (12/12)**.
+* `tests/harness/state_test.sh` → **PASSED (16/16)**.
 * `./harness verify` con el árbol sucio → `HARNESS RESULT: PASSED`, 65 tests
   (el flujo actual sigue compatible). Evidencia:
-  `artifacts/harness/20260817T165216Z-1aec6f2-dirty-f5c05dc/`.
+  `artifacts/harness/20260817T182309Z-18ec5a4-dirty-d4589d4/`.
 * `./harness state` sobre el repo real: `dirty: true`, `changedFiles: 5`,
   determinista entre corridas y con `.git/objects` intacto (555 → 555).
 * **El identificador es auditable:** recomputar a mano
@@ -355,6 +374,24 @@ real, no ruido:
    todo se hashee como si terminara en LF en cualquier plataforma. Reproducido
    después como test local (`test_el_state_no_depende_del_fin_de_linea_en_disco`),
    que falla sin el fix.
+
+4. **El identificador describía el índice, no el contenido.** Detectado en
+   review del PR: el manifiesto listaba primero los tracked y después los
+   untracked, así que un `git add` sobre un archivo **sin modificarlo** lo
+   movía de grupo y cambiaba el `state`. Era el mutante "invertir el orden de
+   los grupos" que se había dado por bueno con el razonamiento equivocado
+   ("cualquier orden fijo vale"): vale cualquier orden **fijo**, y el orden por
+   grupos no lo es, porque depende del estado del índice. Ahora ambos scripts
+   ordenan **todos** los paths juntos, byte a byte: `LC_ALL=C sort` en bash y
+   el `StringComparer` ordinal de .NET en `harness.cmd` (el `sort.exe` de
+   Windows ordena según el locale). Dos tests lo guardan, ambos vistos en rojo
+   antes: el `git add` que no debe cambiar nada, y la independencia del locale
+   de quien ejecuta.
+
+   El segundo test **se auto-omitía en silencio**: `locale -a | grep -q` bajo
+   `pipefail` hace que grep cierre el pipe, `locale` muera de SIGPIPE y el
+   pipeline cuente como fallido. Quitando el `-q` empezó a ejecutarse de verdad
+   y solo entonces murió el mutante que quita `LC_ALL=C`.
 
 ## Desviaciones respecto al plan
 
