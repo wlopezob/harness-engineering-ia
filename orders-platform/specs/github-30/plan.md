@@ -1,0 +1,244 @@
+# github-30 — `./harness` y `harness.cmd` con el mismo contrato público
+
+## Work item
+
+* Fuente: GitHub Issue
+  [#30](https://github.com/wlopezob/harness-engineering-ia/issues/30)
+* Título: *Keep Bash and Windows harness commands behaviorally equivalent*
+
+El issue guarda el QUÉ. Este documento guarda el CÓMO. Continúa #26 (que
+demostró que revisar `harness.cmd` "por inspección" no basta) y #28 (el gate
+`Harness self-test` que este trabajo debe poder poner en rojo).
+
+## Entendimiento técnico (estado del working copy)
+
+Punto de partida: `main` @ `1f09e4b` (incluye #28).
+
+### Inventario de divergencias (leídos ambos scripts completos)
+
+| Aspecto | `./harness` (bash) | `harness.cmd` | Paridad |
+| ------- | ------------------ | ------------- | ------- |
+| Comandos despachados | `verify format mutation state help/--help/-h` | `verify format state help/--help/-h` | **falta `mutation`** |
+| `help` | lista los 5 comandos; `format` dice *"Corrige el formato"* (español, desalineado) | lista 4; `format` dice *"Apply the repository formatting rules."* | **textos distintos, falta `mutation`** |
+| Comando desconocido | `ERROR: Unknown harness command: X` a **stderr**, línea en blanco, **usage completo**, exit 2 | mismo mensaje a **stdout**, `:help_error` imprime un usage **recortado** (solo `verify` y `help`), exit 2 | exit code igual; **salida distinta** |
+| Mayúsculas | `VERIFY` es desconocido | `if /I` acepta `VERIFY` | **conjuntos distintos** |
+| `mutation` | header, valida dir + `mvnw`, `mvnw test-compile org.pitest:pitest-maven:mutationCoverage`, banner `MUTATION RESULT: COMPLETED` + ruta del reporte | **no existe** | — |
+| Fallo de Maven en `format`/`mutation` | `set -e` aborta con el exit code de Maven, **sin banner** | `format` imprime `FORMAT RESULT: FAILED` y sale con el exit code | exit code igual; **mensaje distinto** |
+| Validaciones previas | `verify`/`mutation`: dir y wrapper (exit 2); `format`: solo wrapper | `verify`: dir y wrapper; `format`: solo wrapper | igual donde existe |
+| Wrapper | `./mvnw` | `mvnw.cmd` | correcto por plataforma |
+| Goals de Maven | `clean verify` / `spotless:apply` / `test-compile org.pitest:…` | `clean verify` / `spotless:apply` | igual donde existe |
+| Evidencia de `verify` | copia también `target/pit-reports` | **no copia `pit-reports`** (hallazgo de #26) | **falta** |
+| `state` | idéntico algoritmo; paridad **medida** en CI desde #26 | idem | ✓ |
+| Comentario en `harness.cmd` | — | dice *"el orden lo fija git"*, obsoleto desde el sort global de #26 | doc |
+
+Los mensajes de error `Backend directory not found` / `Maven Wrapper not
+found`, los banners `HARNESS RESULT`, `FORMAT RESULT`, `MUTATION RESULT` y los
+exit codes `0`/`2`/`<maven>` ya coinciden donde el comando existe.
+
+### Qué hay para probar
+
+* `tests/harness/state_test.sh` (16) prueba `state`/`verify` de **bash** con un
+  `mvnw` de mentira; su `test_bash_y_cmd_declaran_la_misma_identidad` es una
+  comprobación **de texto** sobre ambos scripts. `selftest_gate_test.sh` (10)
+  exige que el `needs` del gate liste **todos** los jobs: cualquier job nuevo
+  hay que añadirlo o el self-test falla.
+* El workflow ya tiene un job `windows-latest` que ejecuta `harness.cmd state`
+  de verdad. **`windows-latest` trae Git Bash** (`shell: bash`), así que la
+  misma suite bash puede correr allí e invocar `cmd //c harness.cmd …`.
+* No hay Windows ni `pwsh` en la máquina de desarrollo: lo que toque
+  `harness.cmd` solo se ve correr en CI (como en #26).
+
+## Decisiones propuestas (a validar con el usuario)
+
+### 1. Contrato público explícito y **una sola suite de comportamiento** que se ejecuta contra las dos implementaciones
+
+`tests/harness/contract_test.sh`, bash plano sobre `testlib.sh`, parametrizada
+por `HARNESS_IMPL=bash|cmd`. Cada caso crea un repo git temporal con `harness`,
+`harness.cmd` y **dos wrappers de mentira** (`mvnw` y `mvnw.cmd`) que
+registran los argumentos recibidos en `mvnw-args.txt` y salen con
+`HARNESS_TEST_MVNW_EXIT` (0 por defecto). Un helper `run_harness …` ejecuta
+`./harness` o `cmd //c harness.cmd` según la plataforma; **las aserciones son
+las mismas**. Es la definición operativa de "paridad": el mismo test, con las
+mismas entradas, tiene que pasar en los dos.
+
+En CI: job `contract-linux` (`ubuntu-latest`, `./harness`) y job
+`contract-windows` (`windows-latest`, `shell: bash`, `harness.cmd`). Nombres:
+`Command contract (bash)` / `Command contract (cmd)`, como los de `state`. Ambos
+entran en el `needs` del gate, así que una regresión de paridad deja rojo
+`Harness self-test` (criterio del issue).
+
+*Alternativa descartada:* suite en PowerShell (`pwsh` existe en los tres
+runners). No se puede ejecutar en la máquina de desarrollo y obligaría a
+mantener un segundo runner; con Git Bash la suite bash cubre los dos.
+
+### 2. Una suite **estática** de paridad que detecta comandos añadidos o quitados en una sola implementación
+
+`tests/harness/parity_test.sh` lee los dos scripts (sin ejecutarlos) y compara:
+
+* el **conjunto de comandos despachados** — arms del `case` en bash frente a
+  las líneas `if "%~1"=="X" goto` en cmd — y que ambos incluyan como mínimo
+  `verify format mutation state help` (más los alias `--help`/`-h`);
+* que el **`help` de cada script liste exactamente su conjunto despachado**
+  (nada oculto ni fantasma);
+* el **texto completo del `help`**, igual en los dos módulo el nombre del
+  programa (`./harness` ↔ `harness.cmd`, con los escapes `^` de batch
+  quitados);
+* la **invocación de Maven por comando** — mismos argumentos módulo el
+  wrapper (`./mvnw` ↔ `mvnw.cmd`): `--batch-mode --no-transfer-progress
+  clean verify`, `… spotless:apply`, `… test-compile
+  org.pitest:pitest-maven:mutationCoverage`.
+
+Corre en el job `self-test` (ubuntu, junto a las otras dos suites) y en local.
+Es la parte del criterio "detectar si en el futuro se agrega o elimina un
+comando en una implementación y no en la otra" que no depende de Windows; la
+suite de contrato en `windows-latest` es la parte que **se ejecuta**.
+
+### 3. `harness.cmd mutation`: mismo proceso lógico que bash
+
+Nueva etiqueta `:mutation`: header, valida `API_DIR` y luego `mvnw.cmd`
+(`exit /b 2` con los mismos mensajes), `pushd` + `call mvnw.cmd --batch-mode
+--no-transfer-progress test-compile org.pitest:pitest-maven:mutationCoverage`,
+y banner `MUTATION RESULT: COMPLETED` + `Report: …\target\pit-reports\index.html`
+o `MUTATION RESULT: FAILED` + exit code de Maven. Se añade al despacho y al
+`help`.
+
+### 4. Alinear la semántica de fallo de `format` y `mutation` en bash con la de cmd
+
+Hoy bash aborta por `set -e` con el exit code de Maven pero **sin banner**;
+cmd imprime `FORMAT RESULT: FAILED` y sale con el mismo código. Se iguala
+hacia el lado más informativo: bash captura el código, imprime `… RESULT:
+FAILED` y sale con él. Exit codes iguales antes y después; solo se añade el
+banner. Lo mismo para `mutation` en ambos.
+
+### 5. Comando desconocido y `help`: misma salida en los dos
+
+* cmd: el error va a **stderr** (`1>&2`), después el **usage completo** (se
+  extrae `:print_help` como subrutina y desaparece `:help_error`), exit 2.
+* Textos de `help` unificados en inglés y alineados; el de `format` pasa a
+  *"Apply the repository formatting rules (spotless:apply)."* en los dos.
+* **Mayúsculas:** se quita el `/I` de cmd para que el conjunto aceptado sea
+  **exactamente** el mismo (`VERIFY` falla en los dos). Alternativa: dejar cmd
+  case-insensitive como concesión a Windows; rompería el criterio "un comando
+  desconocido debe fallar en ambas" para `VERIFY`.
+
+### 6. Paridad de la evidencia de `verify`: cmd copia `pit-reports`
+
+Divergencia registrada en #26 y de tres líneas; entra porque es paridad de
+`verify`, no evidencia nueva de `mutation` (fuera de alcance: `mutation` sigue
+sin generar evidencia estructurada en ninguna de las dos).
+
+## Cambios propuestos
+
+```
+harness                                  format/mutation: banner FAILED + exit code;
+                                         help alineado
+harness.cmd                              + :mutation, :print_help, unknown → stderr +
+                                         usage completo, sin /I, pit-reports en
+                                         copy_reports, comentario obsoleto corregido
+tests/harness/contract_test.sh           NUEVO — contrato de comportamiento (bash|cmd)
+tests/harness/parity_test.sh             NUEVO — paridad estática de los dos scripts
+.github/workflows/harness-selftest.yml   self-test ejecuta parity_test; + contract-linux
+                                         y contract-windows; gate.needs += ambos
+orders-platform/DECISIONS.md             + D-028
+orders-platform/specs/github-30/plan.md  este documento
+```
+
+Sin tocar: reglas/umbrales de PIT, `backend-verify.yml`, algoritmo de
+`source.state`, backend, contratos. `mutation` sigue sin correr en cada PR.
+
+Pseudocódigo del helper central de la suite de contrato:
+
+```bash
+run_harness() {                       # deja HARNESS_RC y HARNESS_OUT
+  case "${HARNESS_IMPL}" in
+    bash) ( cd "$dir" && ./harness "$@" ) ;;
+    cmd)  ( cd "$dir" && cmd //c harness.cmd "$@" ) ;;   # Git Bash en windows-latest
+  esac 2>&1
+}
+stub mvnw / mvnw.cmd:  escribe "$*" en mvnw-args.txt; exit ${HARNESS_TEST_MVNW_EXIT:-0}
+```
+
+## Impacto
+
+| Componente | Impacto |
+| ---------- | ------- |
+| `harness` (bash) | **sí** — banners de fallo, help; los goals de Maven no cambian |
+| `harness.cmd` | **sí** — `mutation`, help, unknown, pit-reports |
+| `tests/` | **sí** — dos suites nuevas (contrato + estática) |
+| CI | **sí** — dos jobs nuevos + un paso; el gate los exige vía `needs` |
+| Backend / PIT / contratos | no |
+
+## Casos de test en orden (D3 — RED → GREEN → refactor)
+
+**Suite estática** (`parity_test.sh`, corre en local; primeros rojos):
+
+1. Ambos scripts despachan el mismo conjunto de comandos. ← **primer RED**
+   (`mutation` falta en cmd).
+2. El `help` de cada script lista exactamente su conjunto despachado (RED:
+   cmd no lista `mutation`).
+3. El texto del `help` es idéntico módulo el nombre del programa (RED: textos
+   distintos).
+4. Misma invocación de Maven por comando, módulo el wrapper (RED: cmd no
+   tiene `mutation`).
+5. Cada script usa el wrapper de su plataforma y no el de la otra.
+
+**Suite de contrato** (`contract_test.sh`, en local contra bash; contra cmd
+solo en CI):
+
+6. `help` y sin argumentos → exit 0 y lista `verify format mutation state help`.
+7. Comando desconocido → exit 2, `Unknown harness command: bogus` y el usage
+   completo. `VERIFY` también es desconocido.
+8. `mutation` → exit 0, el wrapper recibe `--batch-mode --no-transfer-progress
+   test-compile org.pitest:pitest-maven:mutationCoverage`, banner
+   `MUTATION RESULT: COMPLETED`.
+9. `mutation` con Maven fallando (stub exit 3) → exit 3, `MUTATION RESULT:
+   FAILED`, sin `COMPLETED`. ← RED en bash (hoy no hay banner).
+10. `format` → exit 0, `spotless:apply`, `FORMAT RESULT: APPLIED`; con stub
+    exit 4 → exit 4 y `FORMAT RESULT: FAILED`. ← RED en bash.
+11. `mutation`/`format` sin wrapper → exit 2, `Maven Wrapper not found`.
+12. `verify` → exit 0, `clean verify`, `HARNESS RESULT: PASSED`,
+    `verification.json` con `"result": "PASSED"` y `test-reports/pit-reports`
+    copiado si existe; con stub exit 1 → exit 1, `FAILED` en banner y JSON.
+13. `state` → exit 0, JSON con `"dirty": false` y `state` no vacío;
+    `state --manifest` sin ruta → exit 2.
+
+Los rojos de la suite de contrato contra **cmd** solo se ven en
+`windows-latest`: se documentan aquí cuando el CI los muestre (como en #26).
+
+## Verificación (D4)
+
+```bash
+tests/harness/parity_test.sh                       # estática
+HARNESS_IMPL=bash tests/harness/contract_test.sh   # contrato, lado bash
+tests/harness/state_test.sh                        # 16, sin cambios
+tests/harness/selftest_gate_test.sh                # 10, con el needs ampliado
+./harness verify                                   # el flujo actual sigue compatible
+```
+
+En GitHub: `Command contract (cmd)` en verde en `windows-latest`, los 7 jobs
+del workflow en success y el gate en verde. `./harness mutation` **no se
+ejecuta aquí** (no cambia código Java ni la lógica de PIT); su paridad se
+prueba con el wrapper de mentira, que es exactamente lo que el issue pide.
+
+## Assumptions
+
+* "Mismo conjunto de comandos públicos" = los que aparecen en `help`; los alias
+  `--help`/`-h` se conservan en los dos.
+* Los mensajes se comparan por **líneas principales** (banners `… RESULT: …`,
+  `ERROR: …`, usage), no byte a byte: las rutas (`/` vs `\`) y el nombre del
+  programa difieren por diseño.
+* Git Bash está disponible en `windows-latest` (`shell: bash`) y `cmd //c`
+  propaga el exit code de `harness.cmd`.
+* Fuera de alcance mantenido: `mutation` no genera evidencia ni corre en cada
+  PR; nada de PIT cambia.
+
+## Open questions
+
+Ninguna. Resueltas con el usuario antes de implementar (las cuatro con la
+opción recomendada):
+
+1. **Mayúsculas:** paridad estricta, se quita el `/I` (decisión 5).
+2. **Banner `FAILED`** en bash para `format`/`mutation` (decisión 4).
+3. **Tests:** suite bash de contrato en ambas plataformas + suite estática
+   (decisiones 1 y 2).
+4. **`pit-reports`** en la evidencia de `harness.cmd verify` (decisión 6).
