@@ -205,6 +205,104 @@ class ProductResourceTest {
   }
 
   @Test
+  void post_ajuste_con_delta_positivo_devuelve_200_con_la_cantidad_aumentada() {
+    int id = crearProducto("ADJ-IN", 10);
+
+    given()
+        .contentType("application/json")
+        .body("{\"delta\":5}")
+        .when()
+        .post("/inventory/products/" + id + "/stock-adjustments")
+        .then()
+        .statusCode(200)
+        .body("id", equalTo(id))
+        .body("sku", equalTo("ADJ-IN"))
+        .body("quantity", equalTo(15));
+
+    given()
+        .when()
+        .get("/inventory/products/" + id)
+        .then()
+        .statusCode(200)
+        // la cantidad resultante quedó persistida, no solo en la respuesta
+        .body("quantity", equalTo(15));
+  }
+
+  @Test
+  void post_ajuste_con_delta_negativo_devuelve_200_con_la_cantidad_disminuida() {
+    int id = crearProducto("ADJ-OUT", 10);
+
+    given()
+        .contentType("application/json")
+        .body("{\"delta\":-3}")
+        .when()
+        .post("/inventory/products/" + id + "/stock-adjustments")
+        .then()
+        .statusCode(200)
+        .body("quantity", equalTo(7));
+  }
+
+  @Test
+  void post_ajuste_que_deja_el_stock_negativo_devuelve_409_y_no_persiste() {
+    int id = crearProducto("ADJ-409", 10);
+
+    given()
+        .contentType("application/json")
+        .body("{\"delta\":-11}")
+        .when()
+        .post("/inventory/products/" + id + "/stock-adjustments")
+        .then()
+        .statusCode(409)
+        .body("message", notNullValue());
+
+    given()
+        .when()
+        .get("/inventory/products/" + id)
+        .then()
+        .statusCode(200)
+        // el rechazo deja la cantidad intacta
+        .body("quantity", equalTo(10));
+  }
+
+  @Test
+  void post_ajuste_con_delta_cero_devuelve_400() {
+    int id = crearProducto("ADJ-400", 10);
+
+    given()
+        .contentType("application/json")
+        .body("{\"delta\":0}")
+        .when()
+        .post("/inventory/products/" + id + "/stock-adjustments")
+        .then()
+        .statusCode(400)
+        .body("message", notNullValue());
+  }
+
+  @Test
+  void post_ajuste_a_id_inexistente_devuelve_404() {
+    given()
+        .contentType("application/json")
+        .body("{\"delta\":5}")
+        .when()
+        .post("/inventory/products/99999999/stock-adjustments")
+        .then()
+        .statusCode(404)
+        .body("message", containsString("99999999"));
+  }
+
+  private int crearProducto(String sku, int quantity) {
+    return given()
+        .contentType("application/json")
+        .body("{\"name\":\"Teclado\",\"sku\":\"" + sku + "\",\"quantity\":" + quantity + "}")
+        .when()
+        .post("/inventory/products")
+        .then()
+        .statusCode(201)
+        .extract()
+        .path("id");
+  }
+
+  @Test
   void get_lista_los_productos_registrados() {
     given()
         .contentType("application/json")

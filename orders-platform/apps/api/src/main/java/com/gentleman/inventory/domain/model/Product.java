@@ -40,6 +40,24 @@ public final class Product {
     return new Product(this.id, requireName(name), this.sku, requireQuantity(quantity));
   }
 
+  /**
+   * Devuelve un NUEVO producto con el stock ajustado por delta (positivo = entrada, negativo =
+   * salida), conservando id, nombre y SKU.
+   */
+  public Product adjustStock(int delta) {
+    if (delta == 0) {
+      throw new IllegalArgumentException("El ajuste de stock no puede ser cero");
+    }
+    long adjusted = (long) this.quantity + delta; // en long: int desbordaría a negativo
+    if (adjusted > Integer.MAX_VALUE) {
+      throw new IllegalArgumentException("El ajuste excede la cantidad máxima de un producto");
+    }
+    if (adjusted < 0) {
+      throw new InsufficientStockException(this.quantity, delta);
+    }
+    return new Product(this.id, this.name, this.sku, (int) adjusted);
+  }
+
   private static String requireName(String name) {
     if (name == null || name.isBlank()) {
       throw new IllegalArgumentException("El nombre es obligatorio");
