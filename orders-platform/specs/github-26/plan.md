@@ -413,9 +413,14 @@ real, no ruido:
 4. `harness.cmd` invoca `git hash-object` **por archivo** en vez de
    `--stdin-paths`: en batch, unir dos ficheros línea a línea era O(n²) y
    frágil con `DisableDelayedExpansion`. El manifiesto resultante es idéntico.
-5. Se añadió un caso 12 (paridad declarada: mismo `stateAlgorithm`, mismo
-   `scope` y mismos comandos git en ambos scripts), que caza el olvido de tocar
-   uno de los dos.
+5. **La suite creció de 11 casos planificados a 16.** Los 5 añadidos (12–16,
+   listados arriba) no salieron de la lista previa sino de fallos reales:
+   paridad declarada entre ambos scripts, volcado del manifiesto, fin de línea,
+   `git add` que no debe cambiar el estado e independencia del locale.
+6. **El plan asumía que "cualquier orden fijo vale".** No es cierto: el orden
+   por grupos depende del índice. El manifiesto pasó a orden global byte-wise
+   por path, que es la única forma de que `state` describa el contenido y no el
+   estado del índice.
 
 ## Assumptions
 
