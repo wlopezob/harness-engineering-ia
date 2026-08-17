@@ -323,6 +323,11 @@ Dos correcciones que salieron de ahí:
 * **El identificador es auditable:** recomputar a mano
   `git hash-object --stdin < source-state.txt` devuelve exactamente el `state`
   publicado en `verification.json`.
+* **Paridad demostrada en CI:** el job `bash and cmd agree on the state` pasa
+  en verde tras los tres arreglos de abajo. `./harness` en `ubuntu-latest` y
+  `harness.cmd` en `windows-latest` calculan **el mismo identificador** para el
+  mismo código, con el checkout de Windows entregando CRLF. Es la primera
+  ejecución real de `harness.cmd`, que no se puede correr desde macOS.
 
 ## Lo que encontró el CI (y no se podía ver desde macOS)
 
