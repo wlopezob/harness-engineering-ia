@@ -9,72 +9,9 @@ TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${TESTS_DIR}/../.." && pwd)"
 HARNESS_UNDER_TEST="${REPO_ROOT}/harness"
 
-TESTS_RUN=0
-TESTS_PASSED=0
-TESTS_FAILED=0
-TESTS_SKIPPED=0
-
-# aserciones fallidas: un test puede acumular varias, pero cuenta como uno solo
-ASSERT_FAILURES=0
-
-# Raíz única de temporales: new_repo corre en una subshell (sustitución de
-# comandos), así que no puede poblar un array del shell padre.
-TEST_TMP_ROOT="$(mktemp -d)"
-
-cleanup() {
-  rm -rf "${TEST_TMP_ROOT}"
-  return 0
-}
-trap cleanup EXIT
-
-fail() {
-  ASSERT_FAILURES=$((ASSERT_FAILURES + 1))
-  echo "  FAIL: $1"
-}
-
-# Un test omitido no es un test que pasa: se cuenta aparte para que el resumen
-# no prometa cobertura que no hubo.
-skip() {
-  TESTS_SKIPPED=$((TESTS_SKIPPED + 1))
-  echo "  SKIP: $1"
-}
-
-assert_equals() {
-  local expected="$1" actual="$2" message="$3"
-  if [[ "${expected}" != "${actual}" ]]; then
-    fail "${message} (esperado: '${expected}', obtenido: '${actual}')"
-  fi
-}
-
-assert_not_equals() {
-  local unexpected="$1" actual="$2" message="$3"
-  if [[ "${unexpected}" == "${actual}" ]]; then
-    fail "${message} (ambos: '${actual}')"
-  fi
-}
-
-assert_not_empty() {
-  local value="$1" message="$2"
-  if [[ -z "${value}" ]]; then
-    fail "${message} (vacío)"
-  fi
-}
-
-run_test() {
-  local name="$1"
-  local failures_before="${ASSERT_FAILURES}"
-  local skipped_before="${TESTS_SKIPPED}"
-
-  TESTS_RUN=$((TESTS_RUN + 1))
-  echo "- ${name}"
-  "${name}"
-
-  if [[ "${ASSERT_FAILURES}" -gt "${failures_before}" ]]; then
-    TESTS_FAILED=$((TESTS_FAILED + 1))
-  elif [[ "${TESTS_SKIPPED}" -eq "${skipped_before}" ]]; then
-    TESTS_PASSED=$((TESTS_PASSED + 1))
-  fi
-}
+# Runner compartido: contadores, assert_*, run_test, finish_suite.
+# shellcheck source=tests/harness/testlib.sh
+source "${TESTS_DIR}/testlib.sh"
 
 # Crea un repo git temporal con el harness bajo prueba y un commit inicial.
 new_repo() {
@@ -94,13 +31,6 @@ new_repo() {
   git -C "${dir}" commit --quiet -m "init"
 
   printf '%s' "${dir}"
-}
-
-assert_contains() {
-  local haystack="$1" needle="$2" message="$3"
-  if [[ "${haystack}" != *"${needle}"* ]]; then
-    fail "${message} (no contiene '${needle}')"
-  fi
 }
 
 # Igual que new_repo pero con un mvnw de mentira: verify debe poder correr en
@@ -443,13 +373,4 @@ run_test test_el_state_no_depende_del_fin_de_linea_en_disco
 run_test test_el_state_no_cambia_al_indexar_un_archivo_sin_tocarlo
 run_test test_el_state_no_depende_del_locale_de_quien_lo_ejecuta
 
-echo
-SUMMARY="${TESTS_PASSED} passed, ${TESTS_FAILED} failed, ${TESTS_SKIPPED} skipped"
-SUMMARY="${SUMMARY} (${TESTS_RUN} tests, ${ASSERT_FAILURES} assertion failure(s))"
-
-if [[ "${TESTS_FAILED}" -gt 0 ]]; then
-  echo "SELF-TEST RESULT: FAILED - ${SUMMARY}"
-  exit 1
-fi
-
-echo "SELF-TEST RESULT: PASSED - ${SUMMARY}"
+finish_suite
