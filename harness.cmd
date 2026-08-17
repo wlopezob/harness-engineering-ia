@@ -16,7 +16,7 @@ rem mismo valor que ./harness: el orden lo fija git (no el sort del sistema) y
 rem la normalizacion de fin de linea se fija con core.autocrlf=input en vez de
 rem heredar la config de la maquina.
 set "SOURCE_STATE_SCOPE=repo:tracked+untracked-not-ignored"
-set "SOURCE_STATE_ALGORITHM=git-hash-object -c core.autocrlf=input (manifest '<blob> <path>': ls-files --cached then --others --exclude-standard, git order, LF)"
+set "SOURCE_STATE_ALGORITHM=git-hash-object -c core.autocrlf=input (manifest '<blob> <path>': ls-files --cached + --others --exclude-standard, byte-wise path order, LF)"
 set "SOURCE_STATE=unknown"
 set "SOURCE_DIRTY=false"
 set "SOURCE_CHANGED_FILES=0"
@@ -334,17 +334,23 @@ if errorlevel 1 exit /b 0
 set "STATE_TMP=%TEMP%\harness-state-%RANDOM%%RANDOM%"
 if not exist "%STATE_TMP%" mkdir "%STATE_TMP%"
 
+set "PATHS_RAW=%STATE_TMP%\paths-raw"
 set "PATHS_FILE=%STATE_TMP%\paths"
 set "MANIFEST_FILE=%STATE_TMP%\manifest"
 
 pushd "%ROOT_DIR%"
 
-rem mismo orden que ./harness: primero los tracked, luego los untracked no
-rem ignorados, cada grupo en el orden byte-wise que emite git
+rem mismo orden que ./harness: global byte-wise por path, NO por grupos. Git
+rem emite primero los tracked y luego los untracked, asi que agrupar haria que
+rem un `git add` (que no cambia el contenido) alterara el estado.
 (
     git -c core.quotePath=false ls-files --cached --deduplicate
     git -c core.quotePath=false ls-files --others --exclude-standard
-) > "%PATHS_FILE%"
+) > "%PATHS_RAW%"
+
+rem comparacion ordinal de .NET: equivale a LC_ALL=C sort. El sort.exe de
+rem Windows ordena segun el locale y romperia la paridad con ./harness.
+powershell -NoProfile -Command "$lines = [IO.File]::ReadAllLines('%PATHS_RAW%'); [Array]::Sort($lines, [StringComparer]::Ordinal); [IO.File]::WriteAllLines('%PATHS_FILE%', $lines)"
 
 break > "%MANIFEST_FILE%"
 

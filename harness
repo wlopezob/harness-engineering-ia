@@ -12,7 +12,7 @@ ARTIFACTS_DIR="${ROOT_DIR}/artifacts/harness"
 # defecto Linux hashea un CRLF tal cual y Windows lo convierte a LF, así que el
 # mismo código daría dos identificadores distintos.
 SOURCE_STATE_SCOPE="repo:tracked+untracked-not-ignored"
-SOURCE_STATE_ALGORITHM="git-hash-object -c core.autocrlf=input (manifest '<blob> <path>': ls-files --cached then --others --exclude-standard, git order, LF)"
+SOURCE_STATE_ALGORITHM="git-hash-object -c core.autocrlf=input (manifest '<blob> <path>': ls-files --cached + --others --exclude-standard, byte-wise path order, LF)"
 SOURCE_STATE="unknown"
 SOURCE_DIRTY="false"
 SOURCE_CHANGED_FILES=0
@@ -62,14 +62,15 @@ compute_source_state() {
   hashes_file="${tmp_dir}/hashes"
   manifest_file="${tmp_dir}/manifest"
 
-  # El orden lo fija git, no el `sort` del sistema: git emite cada grupo en
-  # orden byte-wise con el mismo código en toda plataforma, mientras que el
-  # sort de Windows ordena según el locale. Así el manifiesto (y el state) son
-  # idénticos en ./harness y harness.cmd.
+  # Orden global byte-wise por path, NO por grupos: git emite primero los
+  # tracked y luego los untracked, así que agrupar haría que un `git add` (que
+  # no cambia el contenido) moviera el archivo de sitio y alterara el estado.
+  # LC_ALL=C fija la comparación byte a byte; harness.cmd usa la comparación
+  # ordinal de .NET porque el sort de Windows ordena según el locale.
   {
     git -C "${ROOT_DIR}" -c core.quotePath=false ls-files --cached --deduplicate
     git -C "${ROOT_DIR}" -c core.quotePath=false ls-files --others --exclude-standard
-  } > "${paths_file}"
+  } | LC_ALL=C sort > "${paths_file}"
 
   : > "${existing_file}"
   : > "${manifest_file}"

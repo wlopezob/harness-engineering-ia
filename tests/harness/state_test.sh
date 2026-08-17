@@ -354,6 +354,53 @@ test_el_state_no_depende_del_fin_de_linea_en_disco() {
     "CRLF y LF del mismo contenido deben dar el mismo state"
 }
 
+test_el_state_no_cambia_al_indexar_un_archivo_sin_tocarlo() {
+  local dir before after nuevo
+  dir="$(new_repo)"
+
+  # path que ordena ENTRE dos tracked (.../src/Alpha.java va despues de
+  # "harness" y antes de ".../src/Main.java"): si el manifiesto agrupa por
+  # estado del indice en vez de ordenar globalmente, indexarlo lo mueve de sitio
+  nuevo="orders-platform/apps/api/src/Alpha.java"
+  printf 'class Alpha {}\n' > "${dir}/${nuevo}"
+  before="$(state_field "${dir}" state)"
+
+  git -C "${dir}" add "${nuevo}"
+  after="$(state_field "${dir}" state)"
+
+  assert_not_empty "${before}" "el comando debe funcionar con el archivo untracked"
+  assert_not_empty "${after}" "el comando debe funcionar con el archivo indexado"
+  assert_equals "${before}" "${after}" \
+    "git add no cambia el contenido verificable: el state no puede cambiar"
+}
+
+test_el_state_no_depende_del_locale_de_quien_lo_ejecuta() {
+  local dir con_c con_otro otro_locale="en_US.UTF-8"
+
+  dir="$(new_repo)"
+  # nombres que exponen la collation: en C, "Zeta" va antes que "alpha";
+  # en un locale case-insensitive, al reves
+  printf 'class Zeta {}\n' > "${dir}/orders-platform/apps/api/src/Zeta.java"
+  printf 'class alpha {}\n' > "${dir}/orders-platform/apps/api/src/alpha.java"
+
+  con_c="$( cd "${dir}" && LC_ALL=C ./harness state 2>&1 \
+    | sed -n 's/.*"state": "\([0-9a-f]*\)".*/\1/p' | head -1 )"
+  assert_not_empty "${con_c}" "el comando debe funcionar bajo LC_ALL=C"
+
+  # sin `grep -q`: con pipefail, grep cerraria el pipe, `locale` moriria de
+  # SIGPIPE y el pipeline se daria por fallido, omitiendo el test en silencio
+  if ! locale -a 2>/dev/null | grep -ix "${otro_locale}" > /dev/null; then
+    echo "    (omitido: ${otro_locale} no disponible en esta maquina)"
+    return
+  fi
+
+  con_otro="$( cd "${dir}" && LC_ALL="${otro_locale}" ./harness state 2>&1 \
+    | sed -n 's/.*"state": "\([0-9a-f]*\)".*/\1/p' | head -1 )"
+
+  assert_equals "${con_c}" "${con_otro}" \
+    "el orden del manifiesto no puede depender del locale del entorno"
+}
+
 echo "=================================================="
 echo " Harness self-test: source state"
 echo "=================================================="
@@ -372,6 +419,8 @@ run_test test_verify_con_cambios_locales_lo_deja_visible
 run_test test_bash_y_cmd_declaran_la_misma_identidad
 run_test test_state_puede_volcar_el_manifiesto_que_respalda_el_id
 run_test test_el_state_no_depende_del_fin_de_linea_en_disco
+run_test test_el_state_no_cambia_al_indexar_un_archivo_sin_tocarlo
+run_test test_el_state_no_depende_del_locale_de_quien_lo_ejecuta
 
 echo
 if [[ "${TESTS_FAILED}" -gt 0 ]]; then
