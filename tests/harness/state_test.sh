@@ -318,6 +318,24 @@ test_bash_y_cmd_declaran_la_misma_identidad() {
   done
 }
 
+test_state_puede_volcar_el_manifiesto_que_respalda_el_id() {
+  local dir manifest state recomputed
+  dir="$(new_repo)"
+  manifest="${dir}/manifiesto.txt"
+
+  state="$( cd "${dir}" && ./harness state --manifest "${manifest}" \
+    | sed -n 's/.*"state": "\([0-9a-f]*\)".*/\1/p' | head -1 )"
+
+  if [[ ! -f "${manifest}" ]]; then
+    fail "state --manifest debe volcar el manifiesto"
+    return
+  fi
+
+  # el id publicado tiene que ser reproducible desde el manifiesto volcado
+  recomputed="$(git -C "${dir}" hash-object --stdin < "${manifest}")"
+  assert_equals "${state}" "${recomputed}" "el manifiesto debe reproducir el state"
+}
+
 echo "=================================================="
 echo " Harness self-test: source state"
 echo "=================================================="
@@ -334,6 +352,7 @@ run_test test_calcular_el_state_no_modifica_el_repositorio
 run_test test_verify_registra_la_identidad_del_codigo_en_la_evidencia
 run_test test_verify_con_cambios_locales_lo_deja_visible
 run_test test_bash_y_cmd_declaran_la_misma_identidad
+run_test test_state_puede_volcar_el_manifiesto_que_respalda_el_id
 
 echo
 if [[ "${TESTS_FAILED}" -gt 0 ]]; then

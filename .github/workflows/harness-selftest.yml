@@ -43,7 +43,7 @@ jobs:
       - name: Compute source state
         id: compute
         run: |
-          ./harness state
+          ./harness state --manifest manifest.txt
           state="$(./harness state | sed -n 's/.*"state": "\([0-9a-f]*\)".*/\1/p')"
 
           if [ -z "${state}" ]; then
@@ -52,6 +52,12 @@ jobs:
           fi
 
           echo "state=${state}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest-linux
+          path: manifest.txt
 
   state-windows:
     name: Source state (cmd)
@@ -68,7 +74,7 @@ jobs:
         id: compute
         shell: pwsh
         run: |
-          $output = & cmd /c harness.cmd state
+          $output = & cmd /c harness.cmd state --manifest manifest.txt
           $output
           $state = ([regex]::Match(($output -join "`n"), '"state": "([0-9a-f]+)"')).Groups[1].Value
 
@@ -79,6 +85,12 @@ jobs:
 
           "state=$state" >> $env:GITHUB_OUTPUT
 
+      - name: Upload manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest-windows
+          path: manifest.txt
+
   parity:
     name: bash and cmd agree on the state
     needs: [state-linux, state-windows]
@@ -86,6 +98,18 @@ jobs:
     timeout-minutes: 5
 
     steps:
+      - name: Download linux manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: manifest-linux
+          path: linux
+
+      - name: Download windows manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: manifest-windows
+          path: windows
+
       # El checkout de Windows convierte a CRLF; git hash-object normaliza a LF,
       # así que el mismo código debe producir el mismo identificador en ambos.
       - name: Compare identifiers
@@ -102,6 +126,16 @@ jobs:
 
           if [ "${linux}" != "${windows}" ]; then
             echo "ERROR: ./harness y harness.cmd identifican el mismo código de forma distinta" >&2
+            echo "--- diff de los manifiestos (izquierda=linux, derecha=windows):" >&2
+            diff <(tr -d '\r' < linux/manifest.txt) <(tr -d '\r' < windows/manifest.txt) \
+              | head -40 >&2 || true
+            echo "--- ¿solo difieren los finales de línea?" >&2
+            if diff -q <(tr -d '\r' < linux/manifest.txt) \
+                       <(tr -d '\r' < windows/manifest.txt) >/dev/null; then
+              echo "SÍ: el contenido coincide; el hash difiere por CRLF sin normalizar" >&2
+            else
+              echo "NO: el contenido del manifiesto difiere de verdad" >&2
+            fi
             exit 1
           fi
 

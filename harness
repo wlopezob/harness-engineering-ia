@@ -32,6 +32,7 @@ Commands:
   format     Corrige el formato
   mutation Run mutation testing for domain and application.
   state    Print the identity of the source state that would be verified.
+           Use `state --manifest <path>` to also dump the manifest behind it.
   help     Show this help message.
 EOF
 }
@@ -102,7 +103,24 @@ compute_source_state() {
 }
 
 print_source_state() {
+  local manifest_target=""
+
+  # `state --manifest <ruta>` vuelca el manifiesto que respalda el id, para
+  # poder auditarlo (o diffear dos plataformas) sin correr un verify completo
+  if [[ "${1:-}" == "--manifest" ]]; then
+    manifest_target="${2:-}"
+
+    if [[ -z "${manifest_target}" ]]; then
+      echo "ERROR: --manifest necesita una ruta" >&2
+      return 2
+    fi
+  fi
+
   compute_source_state
+
+  if [[ -n "${manifest_target}" && -n "${SOURCE_MANIFEST_FILE}" ]]; then
+    cp "${SOURCE_MANIFEST_FILE}" "${manifest_target}"
+  fi
 
   cat <<EOF
 {
@@ -414,7 +432,7 @@ case "${COMMAND}" in
     mutation_backend
     ;;
   state)
-    print_source_state
+    print_source_state "${2:-}" "${3:-}"
     ;;
   help|--help|-h)
     show_usage

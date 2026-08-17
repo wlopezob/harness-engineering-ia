@@ -309,6 +309,7 @@ echo Commands:
 echo   verify   Run the complete backend verification harness.
 echo   format   Apply the repository formatting rules.
 echo   state    Print the identity of the source state that would be verified.
+echo            Use `state --manifest ^<path^>` to also dump the manifest.
 echo   help     Show this help message.
 exit /b 0
 
@@ -372,7 +373,25 @@ set "SOURCE_MANIFEST_FILE=%MANIFEST_FILE%"
 exit /b 0
 
 :state
+set "STATE_MANIFEST_TARGET="
+
+rem `state --manifest <ruta>` vuelca el manifiesto que respalda el id, para
+rem poder auditarlo (o diffear dos plataformas) sin correr un verify completo
+if /I "%~2"=="--manifest" (
+    if "%~3"=="" (
+        echo ERROR: --manifest necesita una ruta 1>&2
+        exit /b 2
+    )
+    set "STATE_MANIFEST_TARGET=%~3"
+)
+
 call :compute_source_state
+
+if defined STATE_MANIFEST_TARGET (
+    if defined SOURCE_MANIFEST_FILE (
+        copy /Y "!SOURCE_MANIFEST_FILE!" "!STATE_MANIFEST_TARGET!" >nul
+    )
+)
 
 echo {
 echo   "dirty": !SOURCE_DIRTY!,
