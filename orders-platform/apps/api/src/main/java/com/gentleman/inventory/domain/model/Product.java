@@ -37,12 +37,12 @@ public final class Product {
   }
 
   /**
-   * Devuelve un NUEVO producto con el nombre y la cantidad editados, conservando id y SKU (el SKU
-   * es el identificador, no se cambia). Inmutable: no muta this.
+   * Devuelve un NUEVO producto con el nombre editado, conservando id, SKU y cantidad. El SKU es el
+   * identificador y no se cambia; la cantidad SOLO se mueve con adjustStock, que deja movimiento en
+   * el historial. Inmutable: no muta this.
    */
-  public Product update(String name, int quantity) {
-    return new Product(
-        this.id, requireName(name), this.sku, requireQuantity(quantity), this.status);
+  public Product update(String name) {
+    return new Product(this.id, requireName(name), this.sku, this.quantity, this.status);
   }
 
   /**

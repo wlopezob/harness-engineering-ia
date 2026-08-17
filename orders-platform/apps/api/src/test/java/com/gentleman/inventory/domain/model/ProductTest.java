@@ -36,30 +36,23 @@ class ProductTest {
   }
 
   @Test
-  void update_cambia_nombre_y_cantidad_conservando_id_y_sku() {
+  void update_cambia_el_nombre_conservando_id_sku_y_cantidad() {
     Product original = Product.restore(7L, "Teclado", "KEY-001", 10, ProductStatus.ACTIVE);
 
-    Product updated = original.update("Teclado retroiluminado", 25);
+    Product updated = original.update("Teclado retroiluminado");
 
     assertEquals(7L, updated.id());
     assertEquals("KEY-001", updated.sku(), "el SKU no se cambia");
     assertEquals("Teclado retroiluminado", updated.name());
-    assertEquals(25, updated.quantity());
+    assertEquals(10, updated.quantity(), "el stock solo se mueve con un ajuste");
   }
 
   @Test
   void update_rechaza_nombre_en_blanco() {
     Product original = Product.restore(7L, "Teclado", "KEY-001", 10, ProductStatus.ACTIVE);
 
-    assertThrows(IllegalArgumentException.class, () -> original.update("  ", 5));
-    assertThrows(IllegalArgumentException.class, () -> original.update(null, 5));
-  }
-
-  @Test
-  void update_rechaza_cantidad_negativa() {
-    Product original = Product.restore(7L, "Teclado", "KEY-001", 10, ProductStatus.ACTIVE);
-
-    assertThrows(IllegalArgumentException.class, () -> original.update("Teclado", -1));
+    assertThrows(IllegalArgumentException.class, () -> original.update("  "));
+    assertThrows(IllegalArgumentException.class, () -> original.update(null));
   }
 
   @Test

@@ -6,8 +6,9 @@ import com.gentleman.inventory.domain.port.ProductRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 
 /**
- * Caso de uso: editar el nombre y la cantidad de un producto existente. El SKU no se cambia.
- * Orquesta el dominio vía el puerto. Sin HTTP ni SQL.
+ * Caso de uso: editar el nombre de un producto existente. El SKU no se cambia y la cantidad
+ * tampoco: el stock solo se mueve con un ajuste, que deja movimiento en el historial. Orquesta el
+ * dominio vía el puerto. Sin HTTP ni SQL.
  */
 @ApplicationScoped
 public class UpdateProductUseCase {
@@ -18,8 +19,8 @@ public class UpdateProductUseCase {
     this.repository = repository;
   }
 
-  public Product handle(Long id, String name, int quantity) {
+  public Product handle(Long id, String name) {
     Product existing = repository.findById(id).orElseThrow(() -> new ProductNotFoundException(id));
-    return repository.update(existing.update(name, quantity));
+    return repository.update(existing.update(name));
   }
 }

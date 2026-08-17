@@ -7,8 +7,11 @@ import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasItems;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import io.quarkus.test.junit.QuarkusTest;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 @QuarkusTest
@@ -110,7 +113,7 @@ class ProductResourceTest {
   }
 
   @Test
-  void put_actualiza_nombre_y_cantidad_conservando_sku() {
+  void put_actualiza_el_nombre_conservando_sku_y_cantidad() {
     int id =
         given()
             .contentType("application/json")
@@ -124,7 +127,7 @@ class ProductResourceTest {
 
     given()
         .contentType("application/json")
-        .body("{\"name\":\"Teclado v2\",\"quantity\":99}")
+        .body("{\"name\":\"Teclado v2\"}")
         .when()
         .put("/inventory/products/" + id)
         .then()
@@ -132,14 +135,15 @@ class ProductResourceTest {
         .body("id", equalTo(id))
         .body("name", equalTo("Teclado v2"))
         .body("sku", equalTo("PUT-A"))
-        .body("quantity", equalTo(99));
+        // el PUT no mueve el stock: sigue en la cantidad de creación
+        .body("quantity", equalTo(10));
   }
 
   @Test
   void put_a_id_inexistente_devuelve_404() {
     given()
         .contentType("application/json")
-        .body("{\"name\":\"x\",\"quantity\":1}")
+        .body("{\"name\":\"x\"}")
         .when()
         .put("/inventory/products/99999999")
         .then()
@@ -162,20 +166,35 @@ class ProductResourceTest {
 
     given()
         .contentType("application/json")
-        .body("{\"name\":\"   \",\"quantity\":1}")
+        .body("{\"name\":\"   \"}")
         .when()
         .put("/inventory/products/" + id)
         .then()
         .statusCode(400)
         .body("message", notNullValue());
+  }
+
+  @Test
+  void put_con_quantity_en_el_body_devuelve_400_y_no_toca_el_stock() {
+    int id = crearProducto("PUT-QTY", 10);
 
     given()
         .contentType("application/json")
-        .body("{\"name\":\"Valido\",\"quantity\":-5}")
+        .body("{\"name\":\"Teclado v2\",\"quantity\":100}")
         .when()
         .put("/inventory/products/" + id)
         .then()
-        .statusCode(400);
+        // el stock no se edita aquí: se mueve en /stock-adjustments
+        .statusCode(400)
+        .body("message", notNullValue());
+
+    given()
+        .when()
+        .get("/inventory/products/" + id)
+        .then()
+        .statusCode(200)
+        .body("quantity", equalTo(10))
+        .body("name", equalTo("Teclado"));
   }
 
   @Test
@@ -381,7 +400,7 @@ class ProductResourceTest {
     given().when().get("/inventory/products/" + id + "/stock-movements").then().statusCode(404);
     given()
         .contentType("application/json")
-        .body("{\"name\":\"Otro\",\"quantity\":1}")
+        .body("{\"name\":\"Otro\"}")
         .when()
         .put("/inventory/products/" + id)
         .then()
@@ -417,6 +436,52 @@ class ProductResourceTest {
         .then()
         // el SKU sigue reservado por el producto eliminado
         .statusCode(409);
+  }
+
+  @Test
+  void el_historial_explica_siempre_la_cantidad_actual() {
+    int id = crearProducto("INV-CHAIN", 10);
+    ajustarStock(id, 5);
+
+    // intento de mover el stock por la puerta del PUT: se acepte o se rechace, el
+    // historial tiene que seguir explicando la cantidad final
+    given()
+        .contentType("application/json")
+        .body("{\"name\":\"Teclado v2\",\"quantity\":100}")
+        .when()
+        .put("/inventory/products/" + id);
+
+    ajustarStock(id, -3);
+
+    int cantidadActual =
+        given()
+            .when()
+            .get("/inventory/products/" + id)
+            .then()
+            .statusCode(200)
+            .extract()
+            .path("quantity");
+    List<Map<String, Object>> movimientos =
+        given()
+            .when()
+            .get("/inventory/products/" + id + "/stock-movements")
+            .then()
+            .statusCode(200)
+            .extract()
+            .jsonPath()
+            .getList("$");
+
+    int sumaDeltas = movimientos.stream().mapToInt(m -> ((Number) m.get("delta")).intValue()).sum();
+    assertEquals(
+        10 + sumaDeltas,
+        cantidadActual,
+        "cantidad inicial + suma de los deltas del historial debe dar la cantidad actual");
+    for (int i = 0; i < movimientos.size() - 1; i++) {
+      assertEquals(
+          movimientos.get(i + 1).get("resultingQuantity"),
+          movimientos.get(i).get("previousQuantity"),
+          "salto de cantidad sin un movimiento que lo explique");
+    }
   }
 
   private void ajustarStock(int id, int delta) {

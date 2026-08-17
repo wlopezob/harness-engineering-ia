@@ -141,7 +141,7 @@ public class ProductResource {
                 schema = @Schema(implementation = ProductResponse.class))),
     @APIResponse(
         responseCode = "400",
-        description = "Datos inválidos (nombre en blanco, cantidad negativa)",
+        description = "Datos inválidos (nombre en blanco, o un campo no admitido como quantity)",
         content =
             @Content(
                 mediaType = MediaType.APPLICATION_JSON,
@@ -155,7 +155,7 @@ public class ProductResource {
                 schema = @Schema(implementation = ApiError.class)))
   })
   public ProductResponse update(@PathParam("id") Long id, UpdateProductRequest request) {
-    Product product = updateProduct.handle(id, request.name(), request.quantity());
+    Product product = updateProduct.handle(id, request.name());
     return ProductResponse.from(product);
   }
 

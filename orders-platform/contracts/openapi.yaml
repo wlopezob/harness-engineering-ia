@@ -66,9 +66,6 @@ components:
       properties:
         name:
           type: string
-        quantity:
-          type: integer
-          format: int32
 paths:
   /inventory/products:
     get:
@@ -141,7 +138,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProductResponse"
         "400":
-          description: "Datos inválidos (nombre en blanco, cantidad negativa)"
+          description: "Datos inválidos (nombre en blanco, o un campo no admitido\
+            \ como quantity)"
           content:
             application/json:
               schema:

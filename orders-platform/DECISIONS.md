@@ -263,3 +263,28 @@ producto; con borrado físico la FK de `stock_movement` haría fallar el DELETE
 cambia (204/404), solo su efecto. Alternativas descartadas: rechazar el borrado
 con 409 si tiene movimientos (cambia el comportamiento existente) e índice
 único parcial para reutilizar el SKU (fuera de alcance).
+
+### D-025 — El `PUT` no edita `quantity`: el stock solo se mueve con un ajuste
+Detectado en el review del PR #25: `PUT /inventory/products/{id}` cambiaba la
+cantidad **sin registrar movimiento**, así que el historial podía dejar de
+explicar el stock (reproducido: `10 + Σ deltas = 12` con stock real `97`, cadena
+rota por un salto de +85). Decisión: `UpdateProductRequest` pasa a `{name}` y
+`Product.update(name)` conserva la cantidad; el stock solo cambia por
+`POST /{id}/stock-adjustments`. Un `PUT` que traiga `quantity` responde **400**
+(`quarkus.jackson.fail-on-unknown-properties=true` + `InvalidRequestBodyExceptionMapper`,
+que devuelve `ApiError` en vez del 400 sin cuerpo del mapper built-in de
+Quarkus). El diente es `el_historial_explica_siempre_la_cantidad_actual`:
+comprueba que la cadena de movimientos no tiene saltos y que
+`cantidad inicial + Σ deltas == cantidad actual`.
+**Por qué:** hace el estado inválido **irrepresentable** en vez de repararlo —
+un solo camino de escritura del stock, imposible olvidar el movimiento en un
+caso de uso futuro. Se descartó registrar un movimiento desde el `PUT` (deja dos
+caminos con reglas distintas — el `PUT` no conoce "stock insuficiente" ni el
+rechazo de delta 0 — y, sin campo "motivo" (fuera de alcance del issue), una
+corrección sería indistinguible de una entrada real), rechazar solo si el valor
+difiere (409 con semántica rara para un `PUT` y expuesto a carreras) y dejarlo
+documentado (incumple el objetivo del work item a sabiendas). Hay impacto de
+contrato (D6) pero **no hay consumidores** (`apps/` solo contiene `api`): es el
+momento más barato para cerrarlo. Matiza [D-014], que estableció `PUT`
+name+quantity. Si más adelante hace falta fijar un valor absoluto auditado, se
+agrega de forma aditiva al recurso de ajustes (`{"targetQuantity": n}`).

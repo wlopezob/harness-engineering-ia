@@ -355,12 +355,183 @@ nuevo. Evidencia en `artifacts/harness/<timestamp>-<sha>/`.
   sumarse, y el caso 16 agrupa la invisibilidad del producto eliminado en un
   solo test REST.
 
+## Revisión del PR #25 — el `PUT` rompía el historial (RESUELTO: alternativa A)
+
+Detectado en review, con el PR #25 **abierto**. El usuario aprobó la
+**alternativa A + rechazo explícito (400)**, entregada en el mismo PR con commit
+propio. El análisis se conserva íntegro: es el porqué de la decisión.
+
+### El problema
+
+Hay **dos** caminos de escritura de `quantity` y solo uno deja rastro:
+
+| Camino | Regla | ¿Movimiento? |
+| ------ | ----- | ------------ |
+| `POST /{id}/stock-adjustments` | `Product.adjustStock` (delta ≠ 0, sin negativos, sin overflow) | **sí**, atómico |
+| `PUT /{id}` | `Product.update` (solo `quantity >= 0`) | **no** |
+
+Reproducido contra la app real (dev mode + Postgres), producto con cantidad
+inicial 10:
+
+```
+POST /stock-adjustments {"delta":5}    → quantity 15
+PUT  /{id} {"name":"…","quantity":100} → quantity 100      ← sin movimiento
+POST /stock-adjustments {"delta":-3}   → quantity 97
+
+GET /{id}/stock-movements
+  id=2 delta=-3   100 -> 97
+  id=1 delta=+5    10 -> 15
+  cadena: mov 1 termina en 15, mov 2 arranca en 100 → ROTA (salto de +85)
+  10 + Σ deltas (+2) = 12 ; stock real = 97
+```
+
+### Por qué importa
+
+* Rompe el objetivo del work item ("conocer cómo cambió su cantidad a lo largo
+  del tiempo"): el historial puede **omitir el cambio más grande** y nadie lo
+  nota; peor que no tener historial, porque parece completo.
+* Rompe dos invariantes implícitas del modelo:
+  `resultingQuantity[n] == previousQuantity[n+1]` (cadena continua) y
+  `cantidad inicial + Σ deltas == cantidad actual`.
+* El `PUT` es además una puerta trasera a las reglas de stock: fija cualquier
+  valor no negativo sin pasar por "stock insuficiente" ni por el rechazo de
+  delta 0.
+* La creación **no** rompe nada: la cantidad inicial es el `previousQuantity`
+  del primer movimiento y ancla la cadena. El único agujero es el `PUT`.
+
+### Alternativas
+
+**A — El `PUT` deja de editar `quantity` (el stock solo cambia por ajustes).**
+`UpdateProductRequest` pasa a `{name}` y `Product.update(name)` conserva la
+cantidad. La invariante se cumple **por construcción**: no existe forma de mover
+stock sin movimiento, ni hoy ni en un caso de uso futuro.
+*Coste:* cambia el schema del contrato (D6). Hoy **no hay consumidores**
+(`apps/web` no existe; `apps/` solo contiene `api`), así que el coste de romper
+es prácticamente cero y solo crece con el tiempo. Para fijar un valor absoluto
+hay que calcular el delta (`objetivo − actual`) — que además es más robusto ante
+concurrencia que un `PUT` absoluto: dos deltas concurrentes suman, dos escrituras
+absolutas se pisan (D-021).
+
+**B — El `PUT` registra el movimiento de la diferencia.**
+`UpdateProductUseCase` se vuelve `@Transactional`, calcula `delta = nuevo −
+actual` y registra el movimiento cuando `delta != 0`. Contrato **sin cambios**.
+*Coste:* quedan dos caminos con reglas distintas (el `PUT` no conoce "stock
+insuficiente" ni el rechazo de delta 0) y el registro del movimiento hay que
+recordarlo en cada caso de uso nuevo que toque `quantity`. Además el movimiento
+nacido de un `PUT` es una *corrección*, no una entrada/salida, y el issue deja
+"motivo del movimiento" **fuera de alcance**: no habría cómo distinguir una
+corrección de +85 de una entrada real de +85.
+
+**C — Dejarlo como está y documentar la limitación.**
+Coste cero y defendible por alcance (el issue no menciona el `PUT`).
+*Coste:* el criterio de aceptación queda incumplido a sabiendas y el historial
+miente en silencio. Se lista por honestidad; no se recomienda.
+
+**D — El `PUT` acepta `quantity` solo si coincide con la actual (si difiere →
+409, apuntando a `/stock-adjustments`).**
+Mantiene el schema (permite el ciclo GET → editar → PUT del recurso completo) y
+la invariante se cumple como en A.
+*Coste:* un campo obligatorio que no se puede cambiar es semántica rara para un
+`PUT`; agrega un 409 nuevo; quien solo quiera renombrar puede comerse un 409 por
+una carrera con un ajuste ajeno.
+
+### Recomendación: **A**
+
+Es la única que hace el estado inválido **irrepresentable** en vez de repararlo:
+un solo camino de escritura, una sola regla de stock, un solo lugar donde se
+registra el movimiento. Coherente con el repo (la regla vive en el dominio) y
+con D6: hay impacto de contrato, pero sin consumidores este es el momento más
+barato para hacerlo. Si más adelante se necesita fijar un valor absoluto
+auditado, se agrega de forma aditiva al recurso de ajustes (p. ej.
+`{"targetQuantity": n}`, que calcula el delta y registra el movimiento), sin
+reabrir la puerta trasera.
+
+### Sub-decisión (si se aprueba A): ¿qué pasa si el cliente sigue mandando `quantity`?
+
+* **A1 — Rechazo explícito (400).** Requiere activar
+  `quarkus.jackson.fail-on-unknown-properties=true`, que aplica a **toda** la
+  API (un `POST /products` con un campo de más también pasaría a 400).
+  *Recomendado:* un cliente viejo se entera en vez de creer que cambió el stock.
+* **A2 — Ignorar en silencio.** Es el comportamiento por defecto de Quarkus:
+  cero cambios extra, pero el cliente cree que ajustó stock y no lo hizo.
+
+### Dónde aterriza el cambio
+
+En el **PR #25**, con commit propio. El criterio "el historial explica el stock"
+pertenece a #24 y el PR sigue abierto: mergear primero y arreglar después
+dejaría en `main` una versión que ya sabemos inconsistente. Es un cambio de
+superficie → contrato regenerado en el mismo cambio (D6) y `DECISIONS.md` con
+una decisión nueva que matiza [D-014] (que estableció `PUT` name+quantity).
+
+### Casos de test si se aprueba A (D3, en orden)
+
+1. Dominio `ProductTest`: `update(name)` cambia el nombre y **conserva** la
+   cantidad. ← primer RED (la firma no existe).
+2. Aplicación `UpdateProductUseCaseTest`: `handle(id, name)` persiste el
+   producto con la cantidad que tenía (`ArgumentCaptor`), sin recibirla.
+3. REST: `PUT {"name":"Teclado v2"}` → 200 con la cantidad intacta (reescribe
+   `put_actualiza_nombre_y_cantidad_conservando_sku`).
+4. REST: desaparece del `PUT` el 400 por cantidad negativa (se recorta esa mitad
+   de `put_con_datos_invalidos_devuelve_400`; sigue el 400 por nombre en blanco).
+5. REST (solo con A1): `PUT {"name":"x","quantity":99}` → 400.
+6. **REST — el diente del criterio del issue:** crear(10) → ajustar(+5) →
+   `PUT` de nombre → ajustar(−3) → el historial es una cadena continua
+   (`resulting[n] == previous[n+1]`) y `10 + Σ deltas == quantity` actual. Este
+   test, escrito hoy contra el código del PR con un `PUT` de cantidad, sale
+   **rojo** (12 ≠ 97); es el que impide la regresión.
+7. Contrato regenerado; `OpenApiContractTest`/`OpenApiFidelityTest` verdes.
+
+Red de seguridad: los 64 tests del PR. Cambian solo los 3 del `PUT` (puntos 2–4).
+
+### Resultado (alternativa A implementada)
+
+* **Primer RED — el diente del criterio:**
+  `el_historial_explica_siempre_la_cantidad_actual` falló con
+  `expected: <12> but was: <97>` contra el código del PR. Está escrito sin
+  asertar el status del `PUT`, así que **el mismo test sin tocar** pasó a verde
+  cuando el `PUT` empezó a rechazar la cantidad (12 == 12).
+* REDs siguientes: `Product.update` (`required: String,int / found: String`),
+  el caso de uso y el recurso REST en cascada, y el 400 sin cuerpo
+  (`message: null`) que exigió el mapper.
+* `./harness verify` → **PASSED**, 65 tests, JaCoCo OK, SpotBugs 0.
+  Evidencia: `artifacts/harness/20260817T131234Z-1add509/`.
+* `./harness mutation` → 40 mutantes, 93 % eliminados, test strength 97 %; los
+  3 restantes son los preexistentes de github-21.
+* Contrato regenerado: `quantity` desaparece de `UpdateProductRequest` y cambia
+  la descripción del 400. Es el único cambio de superficie.
+
+### Desviaciones respecto a este apartado
+
+* El test de la invariante (punto 6 de la lista) se escribió **primero**, para
+  poder verlo rojo; el resto siguió el orden previsto.
+* Apareció un componente no previsto: `InvalidRequestBodyExceptionMapper`. Con
+  `fail-on-unknown-properties=true` el 400 llegaba **sin cuerpo**, porque lo
+  emitía el mapper built-in de Quarkus para `MismatchedInputException`; un
+  mapper propio para ese tipo exacto lo sustituye y devuelve `ApiError`, como el
+  resto de errores de la API.
+* Se eliminó `update_rechaza_cantidad_negativa` (dominio): `update` ya no recibe
+  cantidad, así que el caso dejó de existir. `requireQuantity` sigue vigente
+  para `create`.
+
+### Impacto (alternativa A)
+
+| Capa | Impacto |
+| ---- | ------- |
+| Domain | `Product.update(String name)` (pierde el parámetro `quantity`) |
+| Application | `UpdateProductUseCase.handle(id, name)` |
+| Infrastructure (REST) | `UpdateProductRequest` = `{name}`; `ProductResource.update` |
+| Persistence | no |
+| OpenAPI | **sí** — regenerar (schema de `UpdateProductRequest`) |
+| Config | `quarkus.jackson.fail-on-unknown-properties=true` (A1) |
+| Infrastructure (REST) | `InvalidRequestBodyExceptionMapper` → 400 con `ApiError` |
+
 ## Assumptions
 
-* Un movimiento por ajuste exitoso: la cantidad solo cambia por ajuste. El
+* ~~Un movimiento por ajuste exitoso: la cantidad solo cambia por ajuste. El
   `PUT /inventory/products/{id}` (que también edita `quantity`) **no** genera
-  movimiento: el issue habla de "ajuste de stock", y el PUT es edición del
-  producto. Si se quiere auditar también el PUT, es otro work item.
+  movimiento~~ → **assumption invalidada en el review del PR #25**: el `PUT`
+  sí cambia la cantidad, así que el historial puede dejar de explicar el stock.
+  Ver "Revisión del PR #25" arriba.
 * La creación del producto (cantidad inicial) y el borrado lógico tampoco
   generan movimiento.
 * El estado del producto no se expone en la API (todo lo visible es `ACTIVE`).
@@ -373,6 +544,9 @@ nuevo. Evidencia en `artifacts/harness/<timestamp>-<sha>/`.
 
 ## Open questions
 
-Ninguna. Resueltas con el usuario: soft delete en vez de borrado físico, ruta
+Ninguna. El agujero del `PUT` se cerró con la alternativa **A + A1**, aprobada
+por el usuario y entregada en el PR #25.
+
+Resueltas con el usuario: soft delete en vez de borrado físico, ruta
 `stock-movements`, SKU reservado tras el borrado, historial retenido pero no
 consultable para productos eliminados.
