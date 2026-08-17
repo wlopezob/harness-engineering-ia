@@ -383,3 +383,42 @@ un checkout *sparse* de `.github/scripts` en el gate.
 El runner de `tests/harness/state_test.sh` se extrajo a
 `tests/harness/testlib.sh` al aparecer la segunda suite (sin cambio de
 comportamiento: 16 passed antes y después). Ver `specs/github-28/plan.md`.
+
+## 2026-08-17 — Paridad bash/cmd del harness (github-30)
+
+### D-028 — El contrato público del harness se prueba con una sola suite contra las dos implementaciones
+`./harness` y `harness.cmd` divergían en lo que **permitían hacer**: `mutation`
+solo existía en bash, el `help` de cmd no lo listaba, un comando desconocido
+mostraba en cmd un usage recortado, cmd aceptaba `VERIFY` (`if /I`), y la
+evidencia de `verify` en cmd no copiaba `pit-reports`. Ahora las dos exponen
+**el mismo conjunto de comandos** (`verify format mutation state help`, más
+los alias `--help`/`-h`), el mismo texto de `help` módulo el nombre del
+programa, la misma semántica de éxito/fallo (exit code de Maven propagado,
+banner `… RESULT: FAILED`, `2` en validaciones previas y comando desconocido)
+y la misma invocación de Maven por comando con el wrapper de cada plataforma
+(`./mvnw` / `mvnw.cmd`). Paridad **no** significa el mismo código: cada
+script sigue siendo idiomático de su plataforma.
+
+**Cómo se mide, en dos capas.** (1) `tests/harness/contract_test.sh` es
+**una sola suite** parametrizada por `HARNESS_IMPL=bash|cmd`: crea un repo
+temporal con wrappers de Maven de mentira (`mvnw`/`mvnw.cmd`) que registran
+los argumentos y salen con `HARNESS_TEST_MVNW_EXIT`, y ejecuta las **mismas
+aserciones** contra el script de la plataforma. En CI corre en `ubuntu-latest`
+contra `./harness` y en `windows-latest` (Git Bash, `cmd //c harness.cmd`)
+contra `harness.cmd`; los dos jobs entran en el `needs` del gate, así que una
+regresión de paridad deja rojo `Harness self-test`. (2)
+`tests/harness/parity_test.sh` compara los dos scripts **sin ejecutarlos**
+(despacho, help, argumentos de Maven, wrapper por plataforma) y corre también
+en local: es lo que detecta que se añada o quite un comando en una
+implementación y no en la otra sin esperar a Windows.
+
+**Por qué una suite bash y no PowerShell:** `pwsh` existe en los tres runners
+pero no en la máquina de desarrollo; con Git Bash la misma suite corre en
+local (lado bash) y en `windows-latest` (lado cmd), y reutiliza el runner
+`testlib.sh`. **Por qué paridad estricta de mayúsculas:** "un comando
+desconocido debe fallar en ambas" no admite que `VERIFY` funcione solo en
+Windows; se quitó el `/I`. **Por qué se igualó hacia el banner `FAILED`:**
+bash abortaba por `set -e` con el exit code correcto pero sin resultado
+principal; se alineó al lado más informativo sin cambiar ningún exit code.
+Fuera de alcance mantenido: `mutation` no genera evidencia ni corre en cada
+PR y nada de PIT cambia. Ver `specs/github-30/plan.md`.

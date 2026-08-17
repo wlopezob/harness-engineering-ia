@@ -242,3 +242,86 @@ opción recomendada):
 3. **Tests:** suite bash de contrato en ambas plataformas + suite estática
    (decisiones 1 y 2).
 4. **`pit-reports`** en la evidencia de `harness.cmd verify` (decisión 6).
+
+## Resultado
+
+### Ciclo TDD (rojos observados)
+
+* **Suite estática:** primer RED = *"./harness y harness.cmd deben despachar
+  exactamente los mismos comandos (esperado: `--help -h format help mutation
+  state verify`, obtenido: `--help -h format help state verify`)"* —
+  literalmente el ejemplo del issue. RED 2–3 con el `diff` del help (falta
+  `mutation`, `format` en español, la descripción de `state` partida distinto).
+  Los casos 4–5 (argumentos de Maven, wrapper por plataforma) pasaron a la
+  primera porque `:mutation` ya se había escrito completo; se les dio dientes
+  por mutación (abajo).
+* **Suite de contrato contra bash:** RED en `mutation` y `format` con Maven
+  fallando (*"no contiene 'MUTATION RESULT: FAILED'"*): bash abortaba por
+  `set -e` sin banner. GREEN capturando el exit code y anunciando `FAILED`.
+* **Suite del gate (#28):** al añadir `contract-linux` y `contract-windows` sin
+  tocar `needs`, RED: *"el needs del gate debe listar exactamente todos los
+  demás jobs (esperado: `contract-linux contract-windows parity self-test
+  state-linux state-windows`)"*. GREEN ampliando `needs`. Es la prueba de que
+  un job nuevo no puede quedar fuera del gate.
+* Un accidente instructivo: `s.index(':compute_source_state')` encontró antes
+  el `call :compute_source_state` de `:verify`, el corte quedó vacío y el
+  bloque de help nuevo se insertó **al principio de `harness.cmd`**. Lo cazó
+  la lectura del diff (`grep -n '^:'` mostró `:help` en la línea 1); reparado
+  antes de seguir.
+* Un defecto de la propia suite cazado antes de Windows: `"harness ${cmd}"`
+  no es substring de `harness.cmd verify`; ahora las aserciones usan el nombre
+  real del programa (`./harness` / `harness.cmd`).
+
+### Mutaciones (con `assert old in s` y restauración en `finally`)
+
+| Suite | Mutante | Resultado |
+| ----- | ------- | --------- |
+| estática | cmd `mutation` sin `test-compile` | **muerto** |
+| estática | bash `format` con `spotless:check` | **muerto** |
+| estática | cmd sin despachar `mutation` | **muerto** (2 tests) |
+| estática | bash help sin `mutation` | **muerto** (2 tests) |
+| estática | cmd help sin `state` | **muerto** (2 tests) |
+| estática | bash invocando `mvnw.cmd` | **muerto** (2 tests) |
+| estática | cmd invocando `mvnw` de bash | **muerto** (2 tests) |
+| estática | cmd help con otro texto en `format` | **muerto** |
+| contrato | `mutation` sin banner `FAILED` | **muerto** |
+| contrato | `mutation` devuelve 0 aunque Maven falle | **muerto** |
+| contrato | comando desconocido sin usage | **muerto** |
+| contrato | bash acepta `VERIFY` | **muerto** |
+| contrato | `mutation` sin `test-compile` | **muerto** |
+| contrato | `verify` no copia `pit-reports` | **muerto** |
+| contrato | `format` sin wrapper sale con 1 | **muerto** |
+
+Hallazgo de la primera ronda estática: el mutante "bash help sin `mutation`"
+moría, pero **el runner se caía** antes del resumen — el `diff` que imprime el
+test sale con 1 y `pipefail` + `set -e` mataban la suite. Arreglado con
+`|| true` y repetida la ronda completa con el resumen presente en los 8.
+
+### Verificación local (D4)
+
+* `tests/harness/parity_test.sh` → `5 passed, 0 failed, 0 skipped`.
+* `HARNESS_IMPL=bash tests/harness/contract_test.sh` → `14 passed, 0 failed,
+  0 skipped`.
+* `tests/harness/state_test.sh` → `16 passed`; `selftest_gate_test.sh` →
+  `10 passed` (con `needs` de 6 jobs).
+* `./harness verify` → `HARNESS RESULT: PASSED`, 65 tests. Evidencia:
+  `artifacts/harness/20260817T232925Z-1f09e4b-dirty-7aed121/`.
+* `./harness bogus` → error a stderr, usage completo, `rc=2`; `./harness
+  help` lista los cinco comandos con el texto unificado.
+* El YAML parsea (`ruby -ryaml`): jobs `[self-test, state-linux,
+  state-windows, contract-linux, contract-windows, parity, gate]` y
+  `gate.needs` con los seis.
+
+### Verificación en GitHub (pendiente del push, tras aprobación)
+
+`Command contract (cmd)` en `windows-latest` es la primera ejecución real de
+`harness.cmd mutation`, del `help` nuevo, del comando desconocido y del
+`verify` con `pit-reports`. Lo que encuentre se documenta aquí (como en #26).
+
+## Desviaciones respecto al plan
+
+1. Ninguna de diseño: nombre de los jobs, suites, wrappers de mentira, `/I`,
+   banners y `pit-reports` son los del plan.
+2. La suite de contrato tiene **14 casos** en vez de los 8 enumerados (6–13):
+   se separaron por comando los casos "sin wrapper" (`mutation`, `format`,
+   `verify`) y los de fallo de Maven, para que un rojo nombre el comando.
