@@ -346,3 +346,40 @@ orden dependiente del índice); hoy está en verde. Se estrena `tests/` con
 `tests/harness/state_test.sh` (bash plano, sin dependencias nuevas) y el
 subcomando `./harness state`, que era la única forma de tener un RED antes del
 código sin esperar a Maven. Ver `specs/github-26/plan.md`.
+
+## 2026-08-17 — El Harness Self-Test bloquea el merge (github-28)
+
+### D-027 — Un job agregador `Harness self-test` es el único required check del workflow
+El workflow `Harness Self-Test` tenía cuatro jobs en verde que **no bloqueaban
+nada**: el ruleset de `main` solo exigía `Maven verify` y `Dependency review`,
+así que un PR que rompiera `./harness state` o la paridad bash/cmd se podía
+mergear. Ahora el workflow expone un job final `gate` con `name: Harness
+self-test`, que depende de **todos** los demás jobs (`self-test`,
+`state-linux`, `state-windows`, `parity`), corre con `if: always()` y falla
+salvo que cada `needs.<job>.result` sea `success`. Ese nombre es el contrato
+con el ruleset: `main` exige ahora tres checks —`Maven verify`,
+`Dependency review`, `Harness self-test`— con la misma configuración anterior
+(`strict`, `do_not_enforce_on_create`, sin bypass).
+
+**Por qué un agregador y no exigir los cuatro jobs:** los required checks se
+identifican por el `name:` del job, así que exigirlos uno a uno acopla el
+ruleset a nombres descriptivos y **un job nuevo no sería obligatorio** hasta
+que alguien tocara el ruleset. Con el agregador el ruleset no cambia al
+evolucionar el workflow, y la suite `tests/harness/selftest_gate_test.sh`
+falla si el `needs` del gate no lista exactamente todos los demás jobs.
+**Por qué `skipped` y `cancelled` cuentan como rojo:** GitHub reporta un job
+omitido como *Success* y no bloquea el merge aunque sea required; si
+`state-windows` falla, `parity` se omite y sin el gate el check omitido
+"pasaría". **Por qué `if: always()` y no el `!cancelled()` que recomienda la
+documentación:** con `!cancelled()` el gate quedaría omitido tras una
+cancelación — justo el caso que debe quedar en rojo. El gate no puede
+colgarse (evalúa un JSON que ya está en el runner) y `timeout-minutes: 2` es
+la red. **Por qué la lógica vive en `.github/scripts/needs_all_succeeded.sh`
+y no inline en el YAML:** un `run:` no se ejecuta en local, y D3 exige ver el
+rojo antes del código; el script se prueba con JSON fabricado (`failure`,
+`cancelled`, `skipped`, `{}`, entrada inválida) sin necesitar GitHub. Coste:
+un checkout *sparse* de `.github/scripts` en el gate.
+
+El runner de `tests/harness/state_test.sh` se extrajo a
+`tests/harness/testlib.sh` al aparecer la segunda suite (sin cambio de
+comportamiento: 16 passed antes y después). Ver `specs/github-28/plan.md`.

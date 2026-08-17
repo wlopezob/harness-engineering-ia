@@ -259,3 +259,65 @@ recomendada):
 2. **Script versionado + suite nueva** con runner compartido (decisiones 3 y 4).
 3. **Ruleset:** en el propio PR, tras ver el gate en verde y antes del merge,
    siempre después de la aprobación de entrega (decisión 5).
+
+## Resultado
+
+### Ciclo TDD (rojos observados)
+
+* **Paso 0 (refactor):** `testlib.sh` extraído; `state_test.sh` siguió en
+  `16 passed, 0 failed, 0 skipped` antes de escribir nada nuevo.
+* **Primer RED:** el script no existía (`rc 127`). GREEN con un `exit 0` de
+  mentira, a propósito.
+* **RED 2–4:** con ese `exit 0`, `failure`, `cancelled` y `skipped` pasaban.
+  GREEN con la comparación `result != "success"`.
+* **RED 5–6:** `{}` y `NEEDS_JSON` sin definir daban `rc 0` — **pasaban por
+  defecto** — y un JSON roto salía con el `rc 5` de `jq` sin explicación.
+  GREEN con las tres guardas explícitas (vacío, no-objeto, sin entradas).
+* **RED 7–10:** el workflow no tenía el job. El extractor de ids ya veía los
+  cuatro existentes (`parity self-test state-linux state-windows`), así que
+  el `needs` esperado salió del propio YAML, no de una lista escrita a mano.
+* Suite final: **10 passed, 0 failed, 0 skipped**.
+
+### Mutaciones (con `assert old in s`, para que la mutación entre de verdad)
+
+| Mutante | Resultado |
+| ------- | --------- |
+| quitar `parity` de `needs` | **muerto** |
+| `!cancelled()` en vez de `always()` | **muerto** |
+| renombrar el check (`Harness Self-Test`) | **muerto** (4 tests) |
+| el gate no ejecuta el script | **muerto** |
+| solo `failure` cuenta como rojo | **muerto** (2 tests: cancelled y skipped) |
+| `failure` y `cancelled`, pero no `skipped` | **muerto** (el test de skipped, solo) |
+| aceptar `needs` vacío | **muerto** |
+
+Un hallazgo de la primera ronda: "solo `failure` cuenta" moría con **una sola**
+aserción, cuando debía tumbar dos tests. El test de skipped llevaba también un
+`failure` (pasaba por la razón equivocada) y `assert_contains "<job>"` era
+débil porque la tabla imprime todos los jobs. Arreglado: el caso de skipped es
+"todo verde salvo `parity=skipped`", y los tres tests exigen la línea
+`ERROR: <job> (<result>)`. Repetida la ronda, cada mutante muere por el test
+que le corresponde.
+
+### Verificación local (D4)
+
+* `tests/harness/state_test.sh` → `16 passed, 0 failed, 0 skipped` (sin cambios
+  de comportamiento tras el refactor).
+* `tests/harness/selftest_gate_test.sh` → `10 passed, 0 failed, 0 skipped`.
+* `./harness verify` → `HARNESS RESULT: PASSED`, 65 tests. Evidencia:
+  `artifacts/harness/20260817T225802Z-547bcb4-dirty-62dff1f/`.
+* El YAML del workflow parsea (`ruby -ryaml`): jobs
+  `[self-test, state-linux, state-windows, parity, gate]`, y
+  `gate.needs = [self-test, state-linux, state-windows, parity]`.
+
+### Verificación en GitHub (pendiente del push, tras aprobación)
+
+Se completa en este mismo documento cuando el PR exista: corrida con los 5
+jobs, `gh pr checks` con `Harness self-test` como required, y el ruleset con
+los tres contextos.
+
+## Desviaciones respecto al plan
+
+1. El checkout del gate usa el modo cono por defecto de `sparse-checkout`
+   (basta para traer un directorio); el plan no lo detallaba.
+2. Ninguna otra hasta aquí: el nombre, el script, la suite, el runner
+   compartido y el orden de los casos son los del plan.
