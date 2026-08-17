@@ -256,12 +256,16 @@ exit /b 0
 set "START_TIME=%~1"
 set "END_TIME=%~2"
 
+rem la expresion va entre comillas: dentro de un bloque ( ... ), cmd toma el
+rem primer ) de la aritmetica como cierre del bloque y aborta el batch con
+rem "was unexpected at this time" (lo cazo la suite de contrato en windows-latest;
+rem verify nunca habia llegado hasta aqui en CI)
 for /f "tokens=1-4 delims=:.," %%A in ("%START_TIME%") do (
-    set /a START_TOTAL=(((1%%A-100)*60+(1%%B-100))*60+(1%%C-100))
+    set /a "START_TOTAL=(((1%%A-100)*60+(1%%B-100))*60+(1%%C-100))"
 )
 
 for /f "tokens=1-4 delims=:.," %%A in ("%END_TIME%") do (
-    set /a END_TOTAL=(((1%%A-100)*60+(1%%B-100))*60+(1%%C-100))
+    set /a "END_TOTAL=(((1%%A-100)*60+(1%%B-100))*60+(1%%C-100))"
 )
 
 if !END_TOTAL! LSS !START_TOTAL! (
@@ -441,11 +445,12 @@ set "STATE_MANIFEST_TARGET="
 
 rem `state --manifest <ruta>` vuelca el manifiesto que respalda el id, para
 rem poder auditarlo (o diffear dos plataformas) sin correr un verify completo
+rem el error sale por goto a una etiqueta de nivel superior: un `exit /b 2`
+rem dentro de un if anidado en otro if llego como 0 al proceso cmd /c en
+rem windows-latest (la suite de contrato lo vio; el mismo exit /b en un bloque
+rem simple si propaga)
 if /I "%~2"=="--manifest" (
-    if "%~3"=="" (
-        echo ERROR: --manifest necesita una ruta 1>&2
-        exit /b 2
-    )
+    if "%~3"=="" goto state_manifest_missing
     set "STATE_MANIFEST_TARGET=%~3"
 )
 
@@ -468,3 +473,7 @@ echo }
 if defined STATE_TMP if exist "%STATE_TMP%" rmdir /S /Q "%STATE_TMP%"
 
 exit /b 0
+
+:state_manifest_missing
+echo ERROR: --manifest necesita una ruta 1>&2
+exit /b 2
