@@ -175,3 +175,40 @@ comportamiento o con decisiones técnicas.
 versionado, el CÓMO no sobrevive a la sesión y el estado del trabajo no puede
 entenderse leyendo el repositorio. El ID trazable cierra el vínculo
 requerimiento ↔ implementación sin duplicar contenido (D1/D2/D5).
+## 2026-08-17 — Ajustes de stock (github-21)
+
+### D-019 — Un endpoint de ajuste con delta firmado, stock insuficiente → 409
+El ajuste de stock se expone como
+`POST /inventory/products/{id}/stock-adjustments` con body `{ "delta": n }`:
+positivo es entrada, negativo es salida. Devuelve **200** con el producto ya
+ajustado. Códigos de error: **400** para un ajuste inválido (`delta == 0` o
+resultado fuera del rango admitido), **404** si el producto no existe y **409**
+si la salida dejaría el stock en negativo.
+**Por qué:** entrada y salida son el mismo concepto de negocio (un ajuste) y el
+signo decide la dirección; dos rutas `increase`/`decrease` duplicarían superficie
+de contrato y tests para la misma regla. El 409 es coherente con
+`DuplicateSkuException` (D-013): pedir más stock del disponible es un conflicto
+con el estado actual del recurso, no un request malformado — mezclarlo con 400
+impediría al cliente distinguir "pediste mal" de "no hay stock". Se descartó 422
+por no introducir un cuarto código sin precedente en el repo. La regla vive en
+`Product.adjustStock` (dominio), no en el recurso REST. Ver
+`specs/github-21/plan.md`.
+
+### D-020 — La aritmética del ajuste se calcula en `long`
+`Product.adjustStock` calcula `(long) quantity + delta` y rechaza con 400 el
+resultado que exceda `Integer.MAX_VALUE`.
+**Por qué:** en `int`, un delta cercano a `Integer.MAX_VALUE` desborda y produce
+un resultado **negativo**, que se persistiría como cantidad negativa: viola el
+criterio de aceptación del work item por la puerta de atrás. El test
+`adjust_stock_rechaza_un_delta_que_desborda_el_rango_de_int` lo demostró en rojo
+— antes del fix, una *entrada* de stock respondía "stock insuficiente".
+
+### D-021 — Concurrencia del ajuste: riesgo conocido y aceptado
+El ajuste es read-modify-write (`findById` → `adjustStock` → `update`) sin
+bloqueo. Dos ajustes simultáneos sobre el mismo producto pueden perder uno
+(last-write-wins). **No se resuelve en este cambio.**
+**Por qué:** el work item no lo pide y deja fuera de alcance auditoría, reservas
+y multi-almacén; resolverlo agregaría una migración (`@Version`) y complejidad
+sin un caso de uso que la justifique todavía. Se registra en vez de resolverse en
+silencio para que la limitación sea visible. Si aparece la necesidad real: bloqueo
+optimista con `@Version` o un `UPDATE` relativo en el adapter de persistencia.

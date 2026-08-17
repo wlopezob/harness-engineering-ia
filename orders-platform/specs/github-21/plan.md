@@ -101,8 +101,9 @@ Modificados:
 domain/model/Product.java          + adjustStock(int delta) → nuevo Product
 infrastructure/rest/ProductResource.java   + POST /{id}/stock-adjustments
 contracts/openapi.yaml             regenerado
-DECISIONS.md                       D-019 (forma del endpoint + 409) y
-                                   D-020 (riesgo de concurrencia aceptado)
+DECISIONS.md                       D-019 (forma del endpoint + 409),
+                                   D-020 (aritmética en long) y
+                                   D-021 (riesgo de concurrencia aceptado)
 ```
 
 Sin tocar: `ProductRepository` (puerto), `ProductEntity`,
@@ -133,24 +134,29 @@ Sin tocar: `ProductRepository` (puerto), `ProductEntity`,
    válido — mata la implementación que use `<= 0` en vez de `< 0`.
 6. *(triangulación de overflow)* delta que desborda `int` → 400 vía
    `IllegalArgumentException`, no una cantidad negativa persistida.
+7. *(agregado durante la implementación)* llegar **exactamente** a
+   `Integer.MAX_VALUE` es válido — mata el mutante `>` → `>=` que PIT reportó
+   sobreviviente en `adjustStock`. Es el mismo límite que el caso 5, del otro
+   lado del rango.
 
 ### B) Aplicación — `AdjustStockUseCaseTest` (unit, Mockito local, AAA)
 
-7. `handle` ajusta el producto encontrado y lo persiste con `repository.update`.
-8. `handle` lanza `ProductNotFoundException` si no existe y **nunca** llama a
+8. `handle` ajusta el producto encontrado y lo persiste con `repository.update`.
+9. `handle` lanza `ProductNotFoundException` si no existe y **nunca** llama a
    `update` (`verify(..., never())`, como en `UpdateProductUseCaseTest`).
 
 ### C) Infra REST — `ProductResourceTest` (`@QuarkusTest`, Postgres real)
 
-9. delta positivo → 200 con la cantidad aumentada.
-10. delta negativo → 200 con la cantidad disminuida.
-11. salida mayor al stock → 409.
-12. delta 0 → 400.
-13. id inexistente → 404.
+10. delta positivo → 200 con la cantidad aumentada.
+11. delta negativo → 200 con la cantidad disminuida.
+12. salida mayor al stock → 409 **y la cantidad queda intacta** (se verifica con
+    un GET posterior: el rechazo no debe persistir nada).
+13. delta 0 → 400.
+14. id inexistente → 404.
 
 ### D) Contrato
 
-14. Regenerar `contracts/openapi.yaml`; `OpenApiContractTest` y
+15. Regenerar `contracts/openapi.yaml`; `OpenApiContractTest` y
     `OpenApiFidelityTest` en verde.
 
 Los 34 tests actuales son la red de seguridad: ninguno debe cambiar. Si alguno
@@ -162,7 +168,7 @@ se pone rojo, el cambio rompió comportamiento existente.
 ./harness verify
 ```
 
-Esperado: `HARNESS RESULT: PASSED` con 34 + 13 tests, JaCoCo ≥ 80 % líneas y
+Esperado: `HARNESS RESULT: PASSED` con 34 + 14 tests, JaCoCo ≥ 80 % líneas y
 ramas, Spotless y SpotBugs limpios. Evidencia en
 `artifacts/harness/<timestamp>-<sha>/`.
 
@@ -171,6 +177,16 @@ Al tocar lógica de dominio con ramas nuevas:
 ```bash
 ./harness mutation
 ```
+
+### Resultado
+
+* `./harness verify` → **PASSED**, 48 tests, JaCoCo OK, SpotBugs 0 hallazgos.
+  Evidencia: `artifacts/harness/20260817T100841Z-c74bb89/`.
+* `./harness mutation` → 91 % de mutantes eliminados, test strength 97 %.
+  Sobre el código de este cambio no sobrevive ningún mutante. Los 3 restantes
+  son preexistentes: el límite de `Product.requireQuantity` (`< 0` vs `<= 0`) y
+  los accessors sin usar de `ProductNotFoundException` y `DuplicateSkuException`.
+  Se dejan como están: son deuda previa, ajena al alcance de este work item.
 
 ## Assumptions
 
