@@ -6,6 +6,16 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 API_DIR="${ROOT_DIR}/orders-platform/apps/api"
 ARTIFACTS_DIR="${ROOT_DIR}/artifacts/harness"
 
+# Identidad del código verificado (github-26). Se calcula con git hash-object:
+# no escribe nada en el repositorio y aplica los filtros de git, de modo que un
+# archivo con CRLF en Windows y LF en macOS produce el mismo hash.
+SOURCE_STATE_SCOPE="repo:tracked+untracked-not-ignored"
+SOURCE_STATE_ALGORITHM="git-hash-object(manifest '<blob> <path>': ls-files --cached then --others --exclude-standard, git order, LF)"
+SOURCE_STATE="unknown"
+SOURCE_DIRTY="false"
+SOURCE_CHANGED_FILES=0
+SOURCE_MANIFEST_FILE=""
+
 show_usage() {
   cat <<'EOF'
 Engineering Harness
@@ -14,14 +24,99 @@ Usage:
   ./harness verify
   ./harness format
   ./harness mutation
+  ./harness state
   ./harness help
 
 Commands:
   verify   Run the complete backend verification harness.
   format     Corrige el formato
   mutation Run mutation testing for domain and application.
+  state    Print the identity of the source state that would be verified.
   help     Show this help message.
 EOF
+}
+
+# Calcula la identidad del estado del código: recorre los archivos tracked y los
+# untracked no ignorados, arma un manifiesto "<blob> <path>" ordenado y lo hashea.
+# No modifica el repositorio (git hash-object sin -w no escribe objetos).
+compute_source_state() {
+  local tmp_dir paths_file existing_file hashes_file manifest_file path
+
+  SOURCE_STATE="unknown"
+  SOURCE_DIRTY="false"
+  SOURCE_CHANGED_FILES=0
+  SOURCE_MANIFEST_FILE=""
+
+  if ! git -C "${ROOT_DIR}" rev-parse --git-dir >/dev/null 2>&1; then
+    return 0
+  fi
+
+  tmp_dir="$(mktemp -d)"
+  paths_file="${tmp_dir}/paths"
+  existing_file="${tmp_dir}/existing"
+  hashes_file="${tmp_dir}/hashes"
+  manifest_file="${tmp_dir}/manifest"
+
+  # El orden lo fija git, no el `sort` del sistema: git emite cada grupo en
+  # orden byte-wise con el mismo código en toda plataforma, mientras que el
+  # sort de Windows ordena según el locale. Así el manifiesto (y el state) son
+  # idénticos en ./harness y harness.cmd.
+  {
+    git -C "${ROOT_DIR}" -c core.quotePath=false ls-files --cached --deduplicate
+    git -C "${ROOT_DIR}" -c core.quotePath=false ls-files --others --exclude-standard
+  } > "${paths_file}"
+
+  : > "${existing_file}"
+  : > "${manifest_file}"
+
+  while IFS= read -r path; do
+    [[ -z "${path}" ]] && continue
+
+    # un tracked borrado del working tree se queda fuera del manifiesto: su
+    # ausencia ya cambia la identidad, y hashearlo fallaría al no existir
+    if [[ -e "${ROOT_DIR}/${path}" ]]; then
+      printf '%s\n' "${path}" >> "${existing_file}"
+    fi
+  done < "${paths_file}"
+
+  if [[ -s "${existing_file}" ]]; then
+    (
+      cd "${ROOT_DIR}"
+      git hash-object --stdin-paths < "${existing_file}"
+    ) > "${hashes_file}"
+
+    paste -d' ' "${hashes_file}" "${existing_file}" > "${manifest_file}"
+  fi
+
+  SOURCE_STATE="$(git -C "${ROOT_DIR}" hash-object --stdin < "${manifest_file}")"
+  SOURCE_CHANGED_FILES="$(
+    git -C "${ROOT_DIR}" status --porcelain --untracked-files=all 2>/dev/null \
+      | grep -c . || true
+  )"
+
+  if [[ "${SOURCE_CHANGED_FILES}" -gt 0 ]]; then
+    SOURCE_DIRTY="true"
+  fi
+
+  SOURCE_MANIFEST_FILE="${manifest_file}"
+}
+
+print_source_state() {
+  compute_source_state
+
+  cat <<EOF
+{
+  "dirty": ${SOURCE_DIRTY},
+  "state": "${SOURCE_STATE}",
+  "stateAlgorithm": "${SOURCE_STATE_ALGORITHM}",
+  "scope": "${SOURCE_STATE_SCOPE}",
+  "changedFiles": ${SOURCE_CHANGED_FILES}
+}
+EOF
+
+  if [[ -n "${SOURCE_MANIFEST_FILE}" ]]; then
+    rm -rf "$(dirname "${SOURCE_MANIFEST_FILE}")"
+  fi
 }
 
 copy_test_reports() {
@@ -79,7 +174,7 @@ write_verification_report() {
 
   cat > "${evidence_dir}/verification.json" <<EOF
 {
-  "schemaVersion": "1.0",
+  "schemaVersion": "1.1",
   "command": "./harness verify",
   "component": "orders-platform/apps/api",
   "result": "${result}",
@@ -91,6 +186,14 @@ write_verification_report() {
     "commit": "${commit_sha}",
     "branch": "${branch}"
   },
+  "source": {
+    "dirty": ${SOURCE_DIRTY},
+    "state": "${SOURCE_STATE}",
+    "stateAlgorithm": "${SOURCE_STATE_ALGORITHM}",
+    "scope": "${SOURCE_STATE_SCOPE}",
+    "changedFiles": ${SOURCE_CHANGED_FILES},
+    "manifest": "source-state.txt"
+  },
   "environment": {
     "ci": "${CI:-false}",
     "githubRunId": "${GITHUB_RUN_ID:-local}",
@@ -98,7 +201,8 @@ write_verification_report() {
   },
   "evidence": {
     "commandLog": "command.log",
-    "testReports": "test-reports"
+    "testReports": "test-reports",
+    "sourceManifest": "source-state.txt"
   }
 }
 EOF
@@ -130,8 +234,23 @@ verify_backend() {
     branch="${GITHUB_HEAD_REF:-detached}"
   fi
 
-  evidence_dir="${ARTIFACTS_DIR}/${timestamp}-${short_sha}"
+  # la identidad se captura ANTES de Maven: lo que genere el build no puede
+  # cambiar el estado que se declara verificado
+  compute_source_state
+
+  if [[ "${SOURCE_DIRTY}" == "true" ]]; then
+    evidence_dir="${ARTIFACTS_DIR}/${timestamp}-${short_sha}-dirty-${SOURCE_STATE:0:7}"
+  else
+    evidence_dir="${ARTIFACTS_DIR}/${timestamp}-${short_sha}"
+  fi
+
   mkdir -p "${evidence_dir}"
+
+  if [[ -n "${SOURCE_MANIFEST_FILE}" ]]; then
+    cp "${SOURCE_MANIFEST_FILE}" "${evidence_dir}/source-state.txt"
+    rm -rf "$(dirname "${SOURCE_MANIFEST_FILE}")"
+    SOURCE_MANIFEST_FILE=""
+  fi
 
   echo "=================================================="
   echo " Engineering Harness: backend verification"
@@ -139,6 +258,16 @@ verify_backend() {
   echo "Repository: ${ROOT_DIR}"
   echo "Backend:    ${API_DIR}"
   echo "Evidence:   ${evidence_dir}"
+  echo "Commit:     ${short_sha} (${branch})"
+
+  if [[ "${SOURCE_DIRTY}" == "true" ]]; then
+    echo "Source:     DIRTY - ${SOURCE_CHANGED_FILES} archivo(s) local(es) sin commit"
+    echo "State:      ${SOURCE_STATE}  (manifiesto: source-state.txt)"
+  else
+    echo "Source:     working tree limpio"
+    echo "State:      ${SOURCE_STATE}"
+  fi
+
   echo
 
   if [[ ! -d "${API_DIR}" ]]; then
@@ -195,6 +324,13 @@ verify_backend() {
   echo
   echo "=================================================="
   echo " HARNESS RESULT: ${result}"
+
+  if [[ "${SOURCE_DIRTY}" == "true" ]]; then
+    echo " Source: DIRTY - HEAD ${short_sha} + cambios locales (state ${SOURCE_STATE:0:7})"
+  else
+    echo " Source: HEAD ${short_sha} (working tree limpio)"
+  fi
+
   echo " Evidence: ${evidence_dir}"
   echo "=================================================="
 
@@ -276,6 +412,9 @@ case "${COMMAND}" in
     ;;
   mutation)
     mutation_backend
+    ;;
+  state)
+    print_source_state
     ;;
   help|--help|-h)
     show_usage

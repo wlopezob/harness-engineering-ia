@@ -1,0 +1,96 @@
+name: Harness Self-Test
+
+on:
+  pull_request:
+    branches:
+      - main
+
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: harness-selftest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  self-test:
+    name: Source state self-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run harness self-test
+        run: tests/harness/state_test.sh
+
+  state-linux:
+    name: Source state (bash)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      state: ${{ steps.compute.outputs.state }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Compute source state
+        id: compute
+        run: |
+          ./harness state
+          state="$(./harness state | sed -n 's/.*"state": "\([0-9a-f]*\)".*/\1/p')"
+          echo "state=${state}" >> "$GITHUB_OUTPUT"
+
+  state-windows:
+    name: Source state (cmd)
+    runs-on: windows-latest
+    timeout-minutes: 10
+    outputs:
+      state: ${{ steps.compute.outputs.state }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Compute source state
+        id: compute
+        shell: pwsh
+        run: |
+          $output = & cmd /c harness.cmd state
+          $output
+          $state = ([regex]::Match(($output -join "`n"), '"state": "([0-9a-f]+)"')).Groups[1].Value
+          "state=$state" >> $env:GITHUB_OUTPUT
+
+  parity:
+    name: bash and cmd agree on the state
+    needs: [state-linux, state-windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      # El checkout de Windows convierte a CRLF; git hash-object normaliza a LF,
+      # así que el mismo código debe producir el mismo identificador en ambos.
+      - name: Compare identifiers
+        run: |
+          linux='${{ needs.state-linux.outputs.state }}'
+          windows='${{ needs.state-windows.outputs.state }}'
+          echo "bash (linux): ${linux}"
+          echo "cmd (windows): ${windows}"
+
+          if [ -z "${linux}" ] || [ -z "${windows}" ]; then
+            echo "ERROR: alguna implementación no devolvió un state" >&2
+            exit 1
+          fi
+
+          if [ "${linux}" != "${windows}" ]; then
+            echo "ERROR: ./harness y harness.cmd identifican el mismo código de forma distinta" >&2
+            exit 1
+          fi
+
+          echo "OK: ambas implementaciones coinciden"
