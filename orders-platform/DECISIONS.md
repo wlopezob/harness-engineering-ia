@@ -212,3 +212,79 @@ y multi-almacén; resolverlo agregaría una migración (`@Version`) y complejida
 sin un caso de uso que la justifique todavía. Se registra en vez de resolverse en
 silencio para que la limitación sea visible. Si aparece la necesidad real: bloqueo
 optimista con `@Version` o un `UPDATE` relativo en el adapter de persistencia.
+
+## 2026-08-17 — Historial de movimientos de stock (github-24)
+
+### D-022 — El caso de uso demarca la transacción del ajuste
+`AdjustStockUseCase.handle` lleva `@jakarta.transaction.Transactional`. Los
+`@Transactional` de los adapters (propagación `REQUIRED`) se unen a esa
+transacción, así que el `update` del producto y el `save` del movimiento se
+commitean o se revierten juntos; cualquier `RuntimeException` revierte ambos.
+Es la primera vez que `application` demarca transacciones; `ArchitectureTest`
+lo permite (solo prohíbe `jakarta..` en `domain`).
+**Por qué:** el work item exige que ajuste y movimiento sean atómicos. Con la
+transacción por método del adapter, el `update` commiteaba solo: el test
+`si_falla_el_registro_del_movimiento_el_stock_no_cambia` lo demostró en rojo
+(cantidad 15 en vez de 10 tras un fallo simulado del `save`). Se descartaron un
+método de puerto compuesto (mezcla dos agregados y esconde la regla en infra) y
+un puerto `UnitOfWork` propio (abstracción sin segundo uso).
+
+### D-023 — `StockMovement` como agregado propio; `Clock` inyectado; ruta `stock-movements`
+- `domain.model.StockMovement` es un `record` inmutable con
+  `id, productId, delta, previousQuantity, resultingQuantity, occurredAt`. La
+  factory `record(before, after, occurredAt)` deriva el delta de las cantidades
+  para que no pueda grabarse un movimiento inconsistente con ellas.
+- La fecha/hora la aporta un `java.time.Clock` inyectado en el caso de uso
+  (`infrastructure.config.ClockProducer` expone `Clock.systemUTC()`; los tests
+  usan `Clock.fixed`). Ni `Instant.now()` en el núcleo (rompe HARNESS C) ni
+  `default now()` en la DB (el movimiento viajaría con `occurredAt` nulo).
+- Historial en `GET /inventory/products/{id}/stock-movements` → 200 lista
+  (`occurred_at desc, id desc`; `id` desempata el mismo instante) / 404. No se
+  reutiliza `stock-adjustments` porque ese POST devuelve `ProductResponse`, no el
+  ajuste creado; darle un GET con otra representación sería incoherente.
+- Persistencia: `stock_movement` (V3) con FK simple a `product`, sin cascade.
+**Por qué:** ver `specs/github-24/plan.md`. El puerto `StockMovementRepository`
+mantiene los tipos JPA dentro de infraestructura (HARNESS E).
+
+### D-024 — Borrar un producto es un cambio de estado (soft delete)
+Decisión del usuario en github-24: `DELETE /inventory/products/{id}` **no borra
+la fila**; el producto pasa a `status = DELETED` (`ProductStatus`, columna V2
+con `default 'ACTIVE'`). `Product.markDeleted()` devuelve un nuevo Product;
+`DeleteProductUseCase` hace `findById → update(markDeleted())`; el puerto pierde
+`deleteById`. `ProductRepository.findById/findAll` devuelven **solo activos**:
+para la API un producto eliminado no existe (404 en GET/PUT/DELETE/ajuste/
+historial, ausente en la lista); el estado no se expone en `ProductResponse`.
+Consecuencias acordadas: el historial del producto eliminado se **conserva** en
+la BD (auditoría) pero **no es consultable** (404); el SKU sigue **reservado**
+(`unique(sku)` intacto → 409 al reutilizarlo).
+**Por qué:** el usuario quiere conservar el historial cuando se elimina un
+producto; con borrado físico la FK de `stock_movement` haría fallar el DELETE
+(500) o exigiría cascade y perder el historial. El contrato del DELETE no
+cambia (204/404), solo su efecto. Alternativas descartadas: rechazar el borrado
+con 409 si tiene movimientos (cambia el comportamiento existente) e índice
+único parcial para reutilizar el SKU (fuera de alcance).
+
+### D-025 — El `PUT` no edita `quantity`: el stock solo se mueve con un ajuste
+Detectado en el review del PR #25: `PUT /inventory/products/{id}` cambiaba la
+cantidad **sin registrar movimiento**, así que el historial podía dejar de
+explicar el stock (reproducido: `10 + Σ deltas = 12` con stock real `97`, cadena
+rota por un salto de +85). Decisión: `UpdateProductRequest` pasa a `{name}` y
+`Product.update(name)` conserva la cantidad; el stock solo cambia por
+`POST /{id}/stock-adjustments`. Un `PUT` que traiga `quantity` responde **400**
+(`quarkus.jackson.fail-on-unknown-properties=true` + `InvalidRequestBodyExceptionMapper`,
+que devuelve `ApiError` en vez del 400 sin cuerpo del mapper built-in de
+Quarkus). El diente es `el_historial_explica_siempre_la_cantidad_actual`:
+comprueba que la cadena de movimientos no tiene saltos y que
+`cantidad inicial + Σ deltas == cantidad actual`.
+**Por qué:** hace el estado inválido **irrepresentable** en vez de repararlo —
+un solo camino de escritura del stock, imposible olvidar el movimiento en un
+caso de uso futuro. Se descartó registrar un movimiento desde el `PUT` (deja dos
+caminos con reglas distintas — el `PUT` no conoce "stock insuficiente" ni el
+rechazo de delta 0 — y, sin campo "motivo" (fuera de alcance del issue), una
+corrección sería indistinguible de una entrada real), rechazar solo si el valor
+difiere (409 con semántica rara para un `PUT` y expuesto a carreras) y dejarlo
+documentado (incumple el objetivo del work item a sabiendas). Hay impacto de
+contrato (D6) pero **no hay consumidores** (`apps/` solo contiene `api`): es el
+momento más barato para cerrarlo. Matiza [D-014], que estableció `PUT`
+name+quantity. Si más adelante hace falta fijar un valor absoluto auditado, se
+agrega de forma aditiva al recurso de ajustes (`{"targetQuantity": n}`).

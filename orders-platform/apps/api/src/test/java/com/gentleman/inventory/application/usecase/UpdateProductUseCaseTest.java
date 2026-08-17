@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 
 import com.gentleman.inventory.domain.model.Product;
 import com.gentleman.inventory.domain.model.ProductNotFoundException;
+import com.gentleman.inventory.domain.model.ProductStatus;
 import com.gentleman.inventory.domain.port.ProductRepository;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -18,19 +19,20 @@ import org.junit.jupiter.api.Test;
 class UpdateProductUseCaseTest {
 
   @Test
-  void handle_actualiza_y_devuelve_el_producto() {
+  void handle_actualiza_el_nombre_conservando_la_cantidad() {
     ProductRepository repository = mock(ProductRepository.class);
     UpdateProductUseCase useCase = new UpdateProductUseCase(repository);
     when(repository.findById(1L))
-        .thenReturn(Optional.of(Product.restore(1L, "Teclado", "KEY-001", 10)));
+        .thenReturn(
+            Optional.of(Product.restore(1L, "Teclado", "KEY-001", 10, ProductStatus.ACTIVE)));
     when(repository.update(any(Product.class))).thenAnswer(inv -> inv.getArgument(0));
 
-    Product result = useCase.handle(1L, "Teclado nuevo", 25);
+    Product result = useCase.handle(1L, "Teclado nuevo");
 
     assertEquals(1L, result.id());
     assertEquals("KEY-001", result.sku(), "el SKU no cambia");
     assertEquals("Teclado nuevo", result.name());
-    assertEquals(25, result.quantity());
+    assertEquals(10, result.quantity(), "el stock solo se mueve con un ajuste");
     verify(repository).update(any(Product.class));
   }
 
@@ -40,7 +42,7 @@ class UpdateProductUseCaseTest {
     UpdateProductUseCase useCase = new UpdateProductUseCase(repository);
     when(repository.findById(99L)).thenReturn(Optional.empty());
 
-    assertThrows(ProductNotFoundException.class, () -> useCase.handle(99L, "x", 1));
+    assertThrows(ProductNotFoundException.class, () -> useCase.handle(99L, "x"));
     verify(repository, never()).update(any(Product.class));
   }
 }

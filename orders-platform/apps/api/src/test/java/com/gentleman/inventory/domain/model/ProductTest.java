@@ -36,35 +36,28 @@ class ProductTest {
   }
 
   @Test
-  void update_cambia_nombre_y_cantidad_conservando_id_y_sku() {
-    Product original = Product.restore(7L, "Teclado", "KEY-001", 10);
+  void update_cambia_el_nombre_conservando_id_sku_y_cantidad() {
+    Product original = Product.restore(7L, "Teclado", "KEY-001", 10, ProductStatus.ACTIVE);
 
-    Product updated = original.update("Teclado retroiluminado", 25);
+    Product updated = original.update("Teclado retroiluminado");
 
     assertEquals(7L, updated.id());
     assertEquals("KEY-001", updated.sku(), "el SKU no se cambia");
     assertEquals("Teclado retroiluminado", updated.name());
-    assertEquals(25, updated.quantity());
+    assertEquals(10, updated.quantity(), "el stock solo se mueve con un ajuste");
   }
 
   @Test
   void update_rechaza_nombre_en_blanco() {
-    Product original = Product.restore(7L, "Teclado", "KEY-001", 10);
+    Product original = Product.restore(7L, "Teclado", "KEY-001", 10, ProductStatus.ACTIVE);
 
-    assertThrows(IllegalArgumentException.class, () -> original.update("  ", 5));
-    assertThrows(IllegalArgumentException.class, () -> original.update(null, 5));
-  }
-
-  @Test
-  void update_rechaza_cantidad_negativa() {
-    Product original = Product.restore(7L, "Teclado", "KEY-001", 10);
-
-    assertThrows(IllegalArgumentException.class, () -> original.update("Teclado", -1));
+    assertThrows(IllegalArgumentException.class, () -> original.update("  "));
+    assertThrows(IllegalArgumentException.class, () -> original.update(null));
   }
 
   @Test
   void adjust_stock_con_delta_positivo_aumenta_la_cantidad() {
-    Product original = Product.restore(7L, "Teclado", "KEY-001", 10);
+    Product original = Product.restore(7L, "Teclado", "KEY-001", 10, ProductStatus.ACTIVE);
 
     Product adjusted = original.adjustStock(5);
 
@@ -76,7 +69,7 @@ class ProductTest {
 
   @Test
   void adjust_stock_con_delta_negativo_disminuye_la_cantidad() {
-    Product original = Product.restore(7L, "Teclado", "KEY-001", 10);
+    Product original = Product.restore(7L, "Teclado", "KEY-001", 10, ProductStatus.ACTIVE);
 
     Product adjusted = original.adjustStock(-3);
 
@@ -85,21 +78,21 @@ class ProductTest {
 
   @Test
   void adjust_stock_rechaza_delta_cero() {
-    Product original = Product.restore(7L, "Teclado", "KEY-001", 10);
+    Product original = Product.restore(7L, "Teclado", "KEY-001", 10, ProductStatus.ACTIVE);
 
     assertThrows(IllegalArgumentException.class, () -> original.adjustStock(0));
   }
 
   @Test
   void adjust_stock_rechaza_una_salida_mayor_al_stock_disponible() {
-    Product original = Product.restore(7L, "Teclado", "KEY-001", 10);
+    Product original = Product.restore(7L, "Teclado", "KEY-001", 10, ProductStatus.ACTIVE);
 
     assertThrows(InsufficientStockException.class, () -> original.adjustStock(-11));
   }
 
   @Test
   void adjust_stock_permite_dejar_la_cantidad_exactamente_en_cero() {
-    Product original = Product.restore(7L, "Teclado", "KEY-001", 10);
+    Product original = Product.restore(7L, "Teclado", "KEY-001", 10, ProductStatus.ACTIVE);
 
     Product adjusted = original.adjustStock(-10);
 
@@ -108,7 +101,7 @@ class ProductTest {
 
   @Test
   void adjust_stock_rechaza_un_delta_que_desborda_el_rango_de_int() {
-    Product original = Product.restore(7L, "Teclado", "KEY-001", 10);
+    Product original = Product.restore(7L, "Teclado", "KEY-001", 10, ProductStatus.ACTIVE);
 
     assertThrows(
         IllegalArgumentException.class,
@@ -118,10 +111,32 @@ class ProductTest {
 
   @Test
   void adjust_stock_permite_llegar_exactamente_a_la_cantidad_maxima() {
-    Product original = Product.restore(7L, "Teclado", "KEY-001", Integer.MAX_VALUE - 5);
+    Product original =
+        Product.restore(7L, "Teclado", "KEY-001", Integer.MAX_VALUE - 5, ProductStatus.ACTIVE);
 
     Product adjusted = original.adjustStock(5);
 
     assertEquals(Integer.MAX_VALUE, adjusted.quantity(), "el máximo es alcanzable, no excedido");
+  }
+
+  @Test
+  void create_deja_el_producto_activo() {
+    Product product = Product.create("Teclado", "KEY-001", 10);
+
+    assertEquals(ProductStatus.ACTIVE, product.status());
+  }
+
+  @Test
+  void mark_deleted_devuelve_un_producto_eliminado_conservando_sus_datos() {
+    Product original = Product.restore(7L, "Teclado", "KEY-001", 10, ProductStatus.ACTIVE);
+
+    Product deleted = original.markDeleted();
+
+    assertEquals(ProductStatus.DELETED, deleted.status());
+    assertEquals(7L, deleted.id());
+    assertEquals("Teclado", deleted.name());
+    assertEquals("KEY-001", deleted.sku());
+    assertEquals(10, deleted.quantity());
+    assertEquals(ProductStatus.ACTIVE, original.status(), "inmutable: el original no cambia");
   }
 }

@@ -1,7 +1,10 @@
 package com.gentleman.inventory.infrastructure.persistence;
 
+import com.gentleman.inventory.domain.model.ProductStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -28,13 +31,18 @@ public class ProductEntity {
   @Column(nullable = false)
   public int quantity;
 
+  @Enumerated(EnumType.STRING)
+  @Column(nullable = false, length = 16)
+  public ProductStatus status;
+
   protected ProductEntity() {
     // requerido por JPA
   }
 
-  public ProductEntity(String name, String sku, int quantity) {
+  public ProductEntity(String name, String sku, int quantity, ProductStatus status) {
     this.name = name;
     this.sku = sku;
     this.quantity = quantity;
+    this.status = status;
   }
 }

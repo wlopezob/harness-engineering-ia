@@ -3,10 +3,15 @@ package com.gentleman.inventory.infrastructure.rest;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasItems;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import io.quarkus.test.junit.QuarkusTest;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 @QuarkusTest
@@ -108,7 +113,7 @@ class ProductResourceTest {
   }
 
   @Test
-  void put_actualiza_nombre_y_cantidad_conservando_sku() {
+  void put_actualiza_el_nombre_conservando_sku_y_cantidad() {
     int id =
         given()
             .contentType("application/json")
@@ -122,7 +127,7 @@ class ProductResourceTest {
 
     given()
         .contentType("application/json")
-        .body("{\"name\":\"Teclado v2\",\"quantity\":99}")
+        .body("{\"name\":\"Teclado v2\"}")
         .when()
         .put("/inventory/products/" + id)
         .then()
@@ -130,14 +135,15 @@ class ProductResourceTest {
         .body("id", equalTo(id))
         .body("name", equalTo("Teclado v2"))
         .body("sku", equalTo("PUT-A"))
-        .body("quantity", equalTo(99));
+        // el PUT no mueve el stock: sigue en la cantidad de creación
+        .body("quantity", equalTo(10));
   }
 
   @Test
   void put_a_id_inexistente_devuelve_404() {
     given()
         .contentType("application/json")
-        .body("{\"name\":\"x\",\"quantity\":1}")
+        .body("{\"name\":\"x\"}")
         .when()
         .put("/inventory/products/99999999")
         .then()
@@ -160,20 +166,35 @@ class ProductResourceTest {
 
     given()
         .contentType("application/json")
-        .body("{\"name\":\"   \",\"quantity\":1}")
+        .body("{\"name\":\"   \"}")
         .when()
         .put("/inventory/products/" + id)
         .then()
         .statusCode(400)
         .body("message", notNullValue());
+  }
+
+  @Test
+  void put_con_quantity_en_el_body_devuelve_400_y_no_toca_el_stock() {
+    int id = crearProducto("PUT-QTY", 10);
 
     given()
         .contentType("application/json")
-        .body("{\"name\":\"Valido\",\"quantity\":-5}")
+        .body("{\"name\":\"Teclado v2\",\"quantity\":100}")
         .when()
         .put("/inventory/products/" + id)
         .then()
-        .statusCode(400);
+        // el stock no se edita aquí: se mueve en /stock-adjustments
+        .statusCode(400)
+        .body("message", notNullValue());
+
+    given()
+        .when()
+        .get("/inventory/products/" + id)
+        .then()
+        .statusCode(200)
+        .body("quantity", equalTo(10))
+        .body("name", equalTo("Teclado"));
   }
 
   @Test
@@ -288,6 +309,189 @@ class ProductResourceTest {
         .then()
         .statusCode(404)
         .body("message", containsString("99999999"));
+  }
+
+  @Test
+  void get_historial_devuelve_los_movimientos_del_mas_reciente_al_mas_antiguo() {
+    int id = crearProducto("MOV-HIST", 10);
+    ajustarStock(id, 5);
+    ajustarStock(id, -3);
+
+    given()
+        .when()
+        .get("/inventory/products/" + id + "/stock-movements")
+        .then()
+        .statusCode(200)
+        .body("size()", equalTo(2))
+        // el más reciente primero: la salida de -3 (15 → 12)
+        .body("[0].productId", equalTo(id))
+        .body("[0].delta", equalTo(-3))
+        .body("[0].previousQuantity", equalTo(15))
+        .body("[0].resultingQuantity", equalTo(12))
+        .body("[0].occurredAt", notNullValue())
+        .body("[0].id", notNullValue())
+        // luego la entrada de +5 (10 → 15)
+        .body("[1].delta", equalTo(5))
+        .body("[1].previousQuantity", equalTo(10))
+        .body("[1].resultingQuantity", equalTo(15));
+  }
+
+  @Test
+  void get_historial_no_incluye_los_ajustes_rechazados() {
+    int id = crearProducto("MOV-REJ", 10);
+    ajustarStock(id, 5);
+
+    given()
+        .contentType("application/json")
+        .body("{\"delta\":-100}")
+        .when()
+        .post("/inventory/products/" + id + "/stock-adjustments")
+        .then()
+        .statusCode(409);
+
+    given()
+        .when()
+        .get("/inventory/products/" + id + "/stock-movements")
+        .then()
+        .statusCode(200)
+        // solo el ajuste exitoso dejó movimiento
+        .body("size()", equalTo(1))
+        .body("[0].delta", equalTo(5));
+  }
+
+  @Test
+  void get_historial_de_producto_sin_ajustes_devuelve_lista_vacia() {
+    int id = crearProducto("MOV-EMPTY", 10);
+
+    given()
+        .when()
+        .get("/inventory/products/" + id + "/stock-movements")
+        .then()
+        .statusCode(200)
+        .body("size()", equalTo(0));
+  }
+
+  @Test
+  void get_historial_de_id_inexistente_devuelve_404() {
+    given()
+        .when()
+        .get("/inventory/products/99999999/stock-movements")
+        .then()
+        .statusCode(404)
+        .body("message", containsString("99999999"));
+  }
+
+  @Test
+  void delete_deja_el_producto_invisible_para_toda_la_api() {
+    int id = crearProducto("DEL-SOFT", 10);
+    ajustarStock(id, 5);
+
+    given().when().delete("/inventory/products/" + id).then().statusCode(204);
+
+    // para la API un producto eliminado no existe: 404 en todo, ausente en la lista
+    given().when().get("/inventory/products/" + id).then().statusCode(404);
+    given()
+        .contentType("application/json")
+        .body("{\"delta\":1}")
+        .when()
+        .post("/inventory/products/" + id + "/stock-adjustments")
+        .then()
+        .statusCode(404);
+    given().when().get("/inventory/products/" + id + "/stock-movements").then().statusCode(404);
+    given()
+        .contentType("application/json")
+        .body("{\"name\":\"Otro\"}")
+        .when()
+        .put("/inventory/products/" + id)
+        .then()
+        .statusCode(404);
+    given().when().delete("/inventory/products/" + id).then().statusCode(404);
+    given()
+        .when()
+        .get("/inventory/products")
+        .then()
+        .statusCode(200)
+        .body("sku", not(hasItem("DEL-SOFT")));
+  }
+
+  @Test
+  void delete_de_producto_con_movimientos_devuelve_204() {
+    int id = crearProducto("DEL-HIST", 10);
+    ajustarStock(id, 5);
+    ajustarStock(id, -2);
+
+    given().when().delete("/inventory/products/" + id).then().statusCode(204);
+  }
+
+  @Test
+  void post_con_sku_de_un_producto_eliminado_devuelve_409() {
+    int id = crearProducto("DEL-SKU", 10);
+    given().when().delete("/inventory/products/" + id).then().statusCode(204);
+
+    given()
+        .contentType("application/json")
+        .body("{\"name\":\"Nuevo\",\"sku\":\"DEL-SKU\",\"quantity\":1}")
+        .when()
+        .post("/inventory/products")
+        .then()
+        // el SKU sigue reservado por el producto eliminado
+        .statusCode(409);
+  }
+
+  @Test
+  void el_historial_explica_siempre_la_cantidad_actual() {
+    int id = crearProducto("INV-CHAIN", 10);
+    ajustarStock(id, 5);
+
+    // intento de mover el stock por la puerta del PUT: se acepte o se rechace, el
+    // historial tiene que seguir explicando la cantidad final
+    given()
+        .contentType("application/json")
+        .body("{\"name\":\"Teclado v2\",\"quantity\":100}")
+        .when()
+        .put("/inventory/products/" + id);
+
+    ajustarStock(id, -3);
+
+    int cantidadActual =
+        given()
+            .when()
+            .get("/inventory/products/" + id)
+            .then()
+            .statusCode(200)
+            .extract()
+            .path("quantity");
+    List<Map<String, Object>> movimientos =
+        given()
+            .when()
+            .get("/inventory/products/" + id + "/stock-movements")
+            .then()
+            .statusCode(200)
+            .extract()
+            .jsonPath()
+            .getList("$");
+
+    int sumaDeltas = movimientos.stream().mapToInt(m -> ((Number) m.get("delta")).intValue()).sum();
+    assertEquals(
+        10 + sumaDeltas,
+        cantidadActual,
+        "cantidad inicial + suma de los deltas del historial debe dar la cantidad actual");
+    for (int i = 0; i < movimientos.size() - 1; i++) {
+      assertEquals(
+          movimientos.get(i + 1).get("resultingQuantity"),
+          movimientos.get(i).get("previousQuantity"),
+          "salto de cantidad sin un movimiento que lo explique");
+    }
+  }
+
+  private void ajustarStock(int id, int delta) {
+    given()
+        .contentType("application/json")
+        .body("{\"delta\":" + delta + "}")
+        .when()
+        .post("/inventory/products/" + id + "/stock-adjustments")
+        .then()
+        .statusCode(200);
   }
 
   private int crearProducto(String sku, int quantity) {

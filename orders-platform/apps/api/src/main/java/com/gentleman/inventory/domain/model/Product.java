@@ -10,12 +10,14 @@ public final class Product {
   private final String name;
   private final String sku;
   private final int quantity;
+  private final ProductStatus status;
 
-  private Product(Long id, String name, String sku, int quantity) {
+  private Product(Long id, String name, String sku, int quantity, ProductStatus status) {
     this.id = id;
     this.name = name;
     this.sku = sku;
     this.quantity = quantity;
+    this.status = status;
   }
 
   /** Crea un producto nuevo (aún sin id). Valida las reglas de inventario. */
@@ -24,20 +26,23 @@ public final class Product {
     if (sku == null || sku.isBlank()) {
       throw new IllegalArgumentException("El SKU es obligatorio");
     }
-    return new Product(null, validName, sku.trim(), requireQuantity(quantity));
+    return new Product(
+        null, validName, sku.trim(), requireQuantity(quantity), ProductStatus.ACTIVE);
   }
 
-  /** Reconstituye un producto existente (ya persistido, con id). */
-  public static Product restore(Long id, String name, String sku, int quantity) {
-    return new Product(id, name, sku, quantity);
+  /** Reconstituye un producto existente (ya persistido, con id y estado). */
+  public static Product restore(
+      Long id, String name, String sku, int quantity, ProductStatus status) {
+    return new Product(id, name, sku, quantity, status);
   }
 
   /**
-   * Devuelve un NUEVO producto con el nombre y la cantidad editados, conservando id y SKU (el SKU
-   * es el identificador, no se cambia). Inmutable: no muta this.
+   * Devuelve un NUEVO producto con el nombre editado, conservando id, SKU y cantidad. El SKU es el
+   * identificador y no se cambia; la cantidad SOLO se mueve con adjustStock, que deja movimiento en
+   * el historial. Inmutable: no muta this.
    */
-  public Product update(String name, int quantity) {
-    return new Product(this.id, requireName(name), this.sku, requireQuantity(quantity));
+  public Product update(String name) {
+    return new Product(this.id, requireName(name), this.sku, this.quantity, this.status);
   }
 
   /**
@@ -55,7 +60,15 @@ public final class Product {
     if (adjusted < 0) {
       throw new InsufficientStockException(this.quantity, delta);
     }
-    return new Product(this.id, this.name, this.sku, (int) adjusted);
+    return new Product(this.id, this.name, this.sku, (int) adjusted, this.status);
+  }
+
+  /**
+   * Devuelve un NUEVO producto marcado como eliminado, conservando todos sus datos. El borrado es
+   * un cambio de estado, no una desaparición: la fila y su historial permanecen.
+   */
+  public Product markDeleted() {
+    return new Product(this.id, this.name, this.sku, this.quantity, ProductStatus.DELETED);
   }
 
   private static String requireName(String name) {
@@ -86,5 +99,9 @@ public final class Product {
 
   public int quantity() {
     return quantity;
+  }
+
+  public ProductStatus status() {
+    return status;
   }
 }

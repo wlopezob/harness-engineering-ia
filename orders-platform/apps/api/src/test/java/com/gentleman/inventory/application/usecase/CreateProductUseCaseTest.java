@@ -28,7 +28,7 @@ class CreateProductUseCaseTest {
         .thenAnswer(
             inv -> {
               Product p = inv.getArgument(0);
-              return Product.restore(1L, p.name(), p.sku(), p.quantity());
+              return Product.restore(1L, p.name(), p.sku(), p.quantity(), p.status());
             });
 
     Product result = useCase.handle("Teclado mecánico", "KEY-001", 10);

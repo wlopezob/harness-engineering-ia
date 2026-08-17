@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 
 import com.gentleman.inventory.domain.model.Product;
 import com.gentleman.inventory.domain.model.ProductNotFoundException;
+import com.gentleman.inventory.domain.model.ProductStatus;
 import com.gentleman.inventory.domain.port.ProductRepository;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -22,7 +23,8 @@ class GetProductUseCaseTest {
     ProductRepository repository = mock(ProductRepository.class);
     GetProductUseCase useCase = new GetProductUseCase(repository);
     when(repository.findById(1L))
-        .thenReturn(Optional.of(Product.restore(1L, "Teclado", "KEY-001", 10)));
+        .thenReturn(
+            Optional.of(Product.restore(1L, "Teclado", "KEY-001", 10, ProductStatus.ACTIVE)));
 
     Product result = useCase.handle(1L);
 

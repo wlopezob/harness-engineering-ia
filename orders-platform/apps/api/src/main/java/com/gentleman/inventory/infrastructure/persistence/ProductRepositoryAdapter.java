@@ -1,6 +1,7 @@
 package com.gentleman.inventory.infrastructure.persistence;
 
 import com.gentleman.inventory.domain.model.Product;
+import com.gentleman.inventory.domain.model.ProductStatus;
 import com.gentleman.inventory.domain.port.ProductRepository;
 import io.quarkus.panache.common.Sort;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -25,7 +26,8 @@ public class ProductRepositoryAdapter implements ProductRepository {
   @Override
   @Transactional
   public Product save(Product product) {
-    ProductEntity entity = new ProductEntity(product.name(), product.sku(), product.quantity());
+    ProductEntity entity =
+        new ProductEntity(product.name(), product.sku(), product.quantity(), product.status());
     products.persist(entity); // IDENTITY → el INSERT asigna el id
     return toDomain(entity);
   }
@@ -39,13 +41,18 @@ public class ProductRepositoryAdapter implements ProductRepository {
   @Override
   @Transactional
   public List<Product> findAll() {
-    return products.listAll(Sort.by("id")).stream().map(this::toDomain).toList();
+    return products.list("status", Sort.by("id"), ProductStatus.ACTIVE).stream()
+        .map(this::toDomain)
+        .toList();
   }
 
   @Override
   @Transactional
   public Optional<Product> findById(Long id) {
-    return products.findByIdOptional(id).map(this::toDomain);
+    return products
+        .find("id = ?1 and status = ?2", id, ProductStatus.ACTIVE)
+        .firstResultOptional()
+        .map(this::toDomain);
   }
 
   @Override
@@ -54,17 +61,12 @@ public class ProductRepositoryAdapter implements ProductRepository {
     ProductEntity entity = products.findById(product.id());
     entity.name = product.name();
     entity.quantity = product.quantity();
+    entity.status = product.status();
     // el SKU no se cambia; dirty checking persiste al cerrar la transacción
     return toDomain(entity);
   }
 
-  @Override
-  @Transactional
-  public boolean deleteById(Long id) {
-    return products.deleteById(id);
-  }
-
   private Product toDomain(ProductEntity entity) {
-    return Product.restore(entity.id, entity.name, entity.sku, entity.quantity);
+    return Product.restore(entity.id, entity.name, entity.sku, entity.quantity, entity.status);
   }
 }
