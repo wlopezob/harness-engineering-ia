@@ -2,8 +2,14 @@
 setlocal EnableExtensions EnableDelayedExpansion
 
 set "ROOT_DIR=%~dp0"
-set "API_DIR=%ROOT_DIR%orders-platform\apps\api"
-set "ARTIFACTS_DIR=%ROOT_DIR%artifacts\harness"
+
+rem %~dp0 termina en barra invertida y `git -C "C:\ruta\"` rompe el argumento:
+rem la barra escapa la comilla de cierre y git no recibe la ruta. Sin ella,
+rem tanto rev-parse como el calculo de identidad funcionan.
+if "%ROOT_DIR:~-1%"=="\" set "ROOT_DIR=%ROOT_DIR:~0,-1%"
+
+set "API_DIR=%ROOT_DIR%\orders-platform\apps\api"
+set "ARTIFACTS_DIR=%ROOT_DIR%\artifacts\harness"
 
 rem Identidad del codigo verificado (github-26). Debe producir EXACTAMENTE el
 rem mismo valor que ./harness: el orden lo fija git (no el sort del sistema) y

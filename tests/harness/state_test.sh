@@ -297,6 +297,12 @@ test_bash_y_cmd_declaran_la_misma_identidad() {
   assert_equals "${bash_algo}" "${cmd_algo}" "ambos scripts deben declarar el mismo algoritmo"
   assert_equals "${bash_scope}" "${cmd_scope}" "ambos scripts deben declarar el mismo alcance"
 
+  # %~dp0 termina en barra invertida y `git -C "C:\ruta\"` rompe el argumento:
+  # git no recibe la ruta y todo queda en "unknown" (lo cazó el job Windows)
+  if ! grep -q 'ROOT_DIR:~0,-1' "${cmd_file}"; then
+    fail "harness.cmd debe quitar la barra final de ROOT_DIR antes de usarlo con git -C"
+  fi
+
   # los comandos que fijan el resultado tienen que estar en las dos
   # implementaciones: la paridad real la mide el workflow harness-selftest
   for marker in \

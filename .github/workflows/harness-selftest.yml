@@ -45,6 +45,12 @@ jobs:
         run: |
           ./harness state
           state="$(./harness state | sed -n 's/.*"state": "\([0-9a-f]*\)".*/\1/p')"
+
+          if [ -z "${state}" ]; then
+            echo "ERROR: ./harness state no devolvió un identificador usable" >&2
+            exit 1
+          fi
+
           echo "state=${state}" >> "$GITHUB_OUTPUT"
 
   state-windows:
@@ -65,6 +71,12 @@ jobs:
           $output = & cmd /c harness.cmd state
           $output
           $state = ([regex]::Match(($output -join "`n"), '"state": "([0-9a-f]+)"')).Groups[1].Value
+
+          if (-not $state) {
+            Write-Error "harness.cmd state no devolvió un identificador usable (¿git no encontró el repositorio?)"
+            exit 1
+          }
+
           "state=$state" >> $env:GITHUB_OUTPUT
 
   parity:
