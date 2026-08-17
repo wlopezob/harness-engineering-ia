@@ -316,8 +316,11 @@ verificación no altera la identidad.
 **Por qué `git hash-object` y no `sha256sum`:** no escribe nada en el
 repositorio (verificado: 555 objetos antes y después), git ya es un requisito
 del harness — `sha256sum` no existe en macOS y en Windows haría falta
-`certutil`/PowerShell —, y aplica los filtros de git, así que un archivo con
-CRLF en Windows y LF en macOS produce el mismo hash. **Por qué el orden lo fija
+`certutil`/PowerShell — y sabe normalizar los finales de línea. Esa
+normalización hay que **fijarla** con `-c core.autocrlf=input`: por defecto cada
+máquina aplica su propia config, y para archivos que git guarda con CRLF (los
+`mvnw.cmd` del repo) Linux hashea el CRLF tal cual mientras Windows lo convierte
+a LF. Lo destapó el job de paridad: 2 de 122 líneas del manifiesto diferían. **Por qué el orden lo fija
 git y no `sort`:** el `sort` de Windows ordena según el locale, no byte-wise, y
 eso daría identificadores distintos para el mismo código; `git ls-files` emite
 cada grupo en orden byte-wise con el mismo código en toda plataforma.

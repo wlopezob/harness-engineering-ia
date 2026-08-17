@@ -13,9 +13,10 @@ set "ARTIFACTS_DIR=%ROOT_DIR%\artifacts\harness"
 
 rem Identidad del codigo verificado (github-26). Debe producir EXACTAMENTE el
 rem mismo valor que ./harness: el orden lo fija git (no el sort del sistema) y
-rem el hash se calcula con git hash-object, que normaliza CRLF a LF.
+rem la normalizacion de fin de linea se fija con core.autocrlf=input en vez de
+rem heredar la config de la maquina.
 set "SOURCE_STATE_SCOPE=repo:tracked+untracked-not-ignored"
-set "SOURCE_STATE_ALGORITHM=git-hash-object(manifest '<blob> <path>': ls-files --cached then --others --exclude-standard, git order, LF)"
+set "SOURCE_STATE_ALGORITHM=git-hash-object -c core.autocrlf=input (manifest '<blob> <path>': ls-files --cached then --others --exclude-standard, git order, LF)"
 set "SOURCE_STATE=unknown"
 set "SOURCE_DIRTY=false"
 set "SOURCE_CHANGED_FILES=0"
@@ -354,7 +355,7 @@ for /f "usebackq delims=" %%P in ("%PATHS_FILE%") do (
     rem un tracked borrado del working tree se queda fuera: su ausencia ya
     rem cambia la identidad, y hashearlo fallaria al no existir
     if exist "%%P" (
-        for /f "delims=" %%H in ('git hash-object -- "%%P"') do (
+        for /f "delims=" %%H in ('git -c core.autocrlf^=input hash-object -- "%%P"') do (
             >> "%MANIFEST_FILE%" echo %%H %%P
         )
     )

@@ -336,6 +336,24 @@ test_state_puede_volcar_el_manifiesto_que_respalda_el_id() {
   assert_equals "${state}" "${recomputed}" "el manifiesto debe reproducir el state"
 }
 
+test_el_state_no_depende_del_fin_de_linea_en_disco() {
+  local dir con_crlf con_lf
+  dir="$(new_repo)"
+
+  # mismo contenido logico, distinto fin de linea: es lo que ocurre entre un
+  # checkout de Windows y uno de Linux, y tambien con archivos que git guarda
+  # con CRLF (mvnw.cmd). El identificador no puede depender de eso.
+  printf 'linea uno\r\nlinea dos\r\n' > "${dir}/orders-platform/apps/api/src/Eol.java"
+  con_crlf="$(state_field "${dir}" state)"
+
+  printf 'linea uno\nlinea dos\n' > "${dir}/orders-platform/apps/api/src/Eol.java"
+  con_lf="$(state_field "${dir}" state)"
+
+  assert_not_empty "${con_crlf}" "el comando debe funcionar con CRLF"
+  assert_equals "${con_crlf}" "${con_lf}" \
+    "CRLF y LF del mismo contenido deben dar el mismo state"
+}
+
 echo "=================================================="
 echo " Harness self-test: source state"
 echo "=================================================="
@@ -353,6 +371,7 @@ run_test test_verify_registra_la_identidad_del_codigo_en_la_evidencia
 run_test test_verify_con_cambios_locales_lo_deja_visible
 run_test test_bash_y_cmd_declaran_la_misma_identidad
 run_test test_state_puede_volcar_el_manifiesto_que_respalda_el_id
+run_test test_el_state_no_depende_del_fin_de_linea_en_disco
 
 echo
 if [[ "${TESTS_FAILED}" -gt 0 ]]; then

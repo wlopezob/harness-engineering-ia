@@ -69,10 +69,11 @@ debe modificar el repositorio".
   256`) y en Windows habría que usar `certutil`/PowerShell. `git` ya es un
   requisito duro del harness, así que el algoritmo es idéntico en las dos
   implementaciones sin detectar binarios.
-* **Paridad Windows/macOS:** `git hash-object` aplica los filtros de git
-  (`core.autocrlf`, `.gitattributes`), así que un archivo con CRLF en Windows
-  y LF en macOS produce **el mismo hash**. Con un sha256 del byte-stream crudo,
-  el mismo código daría ids distintos por plataforma.
+* **Paridad Windows/macOS:** `git hash-object` sabe normalizar los finales de
+  línea, pero hay que **fijar** la normalización con `-c core.autocrlf=input`:
+  por defecto cada máquina usa su propia config y el resultado se invierte
+  según cómo esté almacenado el archivo (ver "Lo que encontró el CI"). Con un
+  sha256 del byte-stream crudo no habría forma de normalizar.
 * Recomputable a mano por cualquiera con `git`, sin herramientas del harness.
 
 Descartado `git stash create` (no incluye untracked) y el índice temporal
@@ -322,6 +323,33 @@ Dos correcciones que salieron de ahí:
 * **El identificador es auditable:** recomputar a mano
   `git hash-object --stdin < source-state.txt` devuelve exactamente el `state`
   publicado en `verification.json`.
+
+## Lo que encontró el CI (y no se podía ver desde macOS)
+
+El job de paridad falló tres veces antes de pasar. Cada fallo fue un defecto
+real, no ruido:
+
+1. **`"state": "unknown"` en Windows.** `%~dp0` termina en barra invertida, así
+   que `git -C "C:\ruta\"` deja la comilla de cierre escapada y git nunca
+   recibe el directorio. Afectaba a **todas** las llamadas a git de
+   `harness.cmd`: `COMMIT_SHA` ya salía `unknown` en Windows antes de esta
+   rama. El job nuevo es lo que lo hizo visible.
+2. **El manifiesto contaminaba su propio identificador.** El job de bash
+   llamaba dos veces a `./harness state`; la primera escribía `manifest.txt`
+   dentro del repo y la segunda lo veía como untracked. Era un fallo del
+   workflow, no de los scripts, y se arregló volcando fuera del repo y leyendo
+   el state de la misma invocación.
+3. **La normalización de fin de línea no estaba fijada.** Con el diff de los
+   dos manifiestos, solo **2 de 122 líneas** diferían: `mvnw.cmd` (los dos que
+   hay en el repo). Están **almacenados en git con CRLF**, y `git hash-object`
+   aplica la conversión según el `core.autocrlf` de cada máquina: Linux los
+   hashea tal cual (CRLF) y Windows los normaliza a LF. La afirmación del plan
+   ("git hash-object hace que CRLF y LF den el mismo hash") era **incompleta**:
+   vale para archivos guardados con LF y se invierte para los guardados con
+   CRLF. El arreglo es fijar `-c core.autocrlf=input` al hashear, de modo que
+   todo se hashee como si terminara en LF en cualquier plataforma. Reproducido
+   después como test local (`test_el_state_no_depende_del_fin_de_linea_en_disco`),
+   que falla sin el fix.
 
 ## Desviaciones respecto al plan
 

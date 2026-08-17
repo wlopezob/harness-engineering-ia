@@ -7,10 +7,12 @@ API_DIR="${ROOT_DIR}/orders-platform/apps/api"
 ARTIFACTS_DIR="${ROOT_DIR}/artifacts/harness"
 
 # Identidad del código verificado (github-26). Se calcula con git hash-object:
-# no escribe nada en el repositorio y aplica los filtros de git, de modo que un
-# archivo con CRLF en Windows y LF en macOS produce el mismo hash.
+# no escribe nada en el repositorio. La normalización de fin de línea se FIJA
+# con core.autocrlf=input en vez de heredar la config de cada máquina: por
+# defecto Linux hashea un CRLF tal cual y Windows lo convierte a LF, así que el
+# mismo código daría dos identificadores distintos.
 SOURCE_STATE_SCOPE="repo:tracked+untracked-not-ignored"
-SOURCE_STATE_ALGORITHM="git-hash-object(manifest '<blob> <path>': ls-files --cached then --others --exclude-standard, git order, LF)"
+SOURCE_STATE_ALGORITHM="git-hash-object -c core.autocrlf=input (manifest '<blob> <path>': ls-files --cached then --others --exclude-standard, git order, LF)"
 SOURCE_STATE="unknown"
 SOURCE_DIRTY="false"
 SOURCE_CHANGED_FILES=0
@@ -85,7 +87,9 @@ compute_source_state() {
   if [[ -s "${existing_file}" ]]; then
     (
       cd "${ROOT_DIR}"
-      git hash-object --stdin-paths < "${existing_file}"
+      # core.autocrlf=input: todo se hashea como si terminara en LF, sin
+      # depender de la plataforma ni de cómo esté almacenado el archivo
+      git -c core.autocrlf=input hash-object --stdin-paths < "${existing_file}"
     ) > "${hashes_file}"
 
     paste -d' ' "${hashes_file}" "${existing_file}" > "${manifest_file}"
