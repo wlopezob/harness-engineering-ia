@@ -1,5 +1,6 @@
 package com.gentleman.inventory.infrastructure.rest;
 
+import com.gentleman.inventory.application.usecase.AdjustStockUseCase;
 import com.gentleman.inventory.application.usecase.CreateProductUseCase;
 import com.gentleman.inventory.application.usecase.DeleteProductUseCase;
 import com.gentleman.inventory.application.usecase.GetProductUseCase;
@@ -38,18 +39,21 @@ public class ProductResource {
   private final GetProductUseCase getProduct;
   private final UpdateProductUseCase updateProduct;
   private final DeleteProductUseCase deleteProduct;
+  private final AdjustStockUseCase adjustStock;
 
   public ProductResource(
       CreateProductUseCase createProduct,
       ListProductsUseCase listProducts,
       GetProductUseCase getProduct,
       UpdateProductUseCase updateProduct,
-      DeleteProductUseCase deleteProduct) {
+      DeleteProductUseCase deleteProduct,
+      AdjustStockUseCase adjustStock) {
     this.createProduct = createProduct;
     this.listProducts = listProducts;
     this.getProduct = getProduct;
     this.updateProduct = updateProduct;
     this.deleteProduct = deleteProduct;
+    this.adjustStock = adjustStock;
   }
 
   @POST
@@ -149,6 +153,42 @@ public class ProductResource {
   public ProductResponse update(@PathParam("id") Long id, UpdateProductRequest request) {
     Product product = updateProduct.handle(id, request.name(), request.quantity());
     return ProductResponse.from(product);
+  }
+
+  @POST
+  @Path("/{id}/stock-adjustments")
+  @APIResponses({
+    @APIResponse(
+        responseCode = "200",
+        description = "Stock ajustado; devuelve el producto con la cantidad resultante",
+        content =
+            @Content(
+                mediaType = MediaType.APPLICATION_JSON,
+                schema = @Schema(implementation = ProductResponse.class))),
+    @APIResponse(
+        responseCode = "400",
+        description = "Ajuste inválido (delta cero o resultado fuera del rango admitido)",
+        content =
+            @Content(
+                mediaType = MediaType.APPLICATION_JSON,
+                schema = @Schema(implementation = ApiError.class))),
+    @APIResponse(
+        responseCode = "404",
+        description = "No existe un producto con ese id",
+        content =
+            @Content(
+                mediaType = MediaType.APPLICATION_JSON,
+                schema = @Schema(implementation = ApiError.class))),
+    @APIResponse(
+        responseCode = "409",
+        description = "La salida dejaría el stock en negativo",
+        content =
+            @Content(
+                mediaType = MediaType.APPLICATION_JSON,
+                schema = @Schema(implementation = ApiError.class)))
+  })
+  public ProductResponse adjustStock(@PathParam("id") Long id, StockAdjustmentRequest request) {
+    return ProductResponse.from(adjustStock.handle(id, request.delta()));
   }
 
   @DELETE

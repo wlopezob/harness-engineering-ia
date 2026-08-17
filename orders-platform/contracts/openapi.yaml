@@ -30,6 +30,12 @@ components:
         quantity:
           type: integer
           format: int32
+    StockAdjustmentRequest:
+      type: object
+      properties:
+        delta:
+          type: integer
+          format: int32
     UpdateProductRequest:
       type: object
       properties:
@@ -166,6 +172,49 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
       summary: Delete
+      tags:
+      - Product Resource
+  /inventory/products/{id}/stock-adjustments:
+    post:
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StockAdjustmentRequest"
+        required: true
+      responses:
+        "200":
+          description: Stock ajustado; devuelve el producto con la cantidad resultante
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductResponse"
+        "400":
+          description: Ajuste inválido (delta cero o resultado fuera del rango admitido)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: No existe un producto con ese id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: La salida dejaría el stock en negativo
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+      summary: Adjust Stock
       tags:
       - Product Resource
 info:
