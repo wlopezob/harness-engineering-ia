@@ -32,6 +32,9 @@ jobs:
       - name: Run merge gate self-test
         run: tests/harness/selftest_gate_test.sh
 
+      - name: Run bash/cmd static parity self-test
+        run: tests/harness/parity_test.sh
+
   state-linux:
     name: Source state (bash)
     runs-on: ubuntu-latest
@@ -99,6 +102,40 @@ jobs:
           name: manifest-windows
           path: ${{ runner.temp }}/manifest.txt
 
+  # Contrato de comportamiento (github-30): la MISMA suite, con las mismas
+  # aserciones, contra ./harness en Linux y contra harness.cmd en Windows.
+  # Maven se sustituye por wrappers de mentira; lo que se mide es el contrato
+  # público (comandos, exit codes, validaciones, banners, evidencia).
+  contract-linux:
+    name: Command contract (bash)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run the contract suite against ./harness
+        env:
+          HARNESS_IMPL: bash
+        run: tests/harness/contract_test.sh
+
+  contract-windows:
+    name: Command contract (cmd)
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Git Bash ejecuta la suite; cada caso invoca `cmd //c harness.cmd ...`
+      - name: Run the contract suite against harness.cmd
+        shell: bash
+        env:
+          HARNESS_IMPL: cmd
+        run: tests/harness/contract_test.sh
+
   parity:
     name: bash and cmd agree on the state
     needs: [state-linux, state-windows]
@@ -160,7 +197,7 @@ jobs:
   # tests/harness/selftest_gate_test.sh falla si falta alguno.
   gate:
     name: Harness self-test
-    needs: [self-test, state-linux, state-windows, parity]
+    needs: [self-test, state-linux, state-windows, parity, contract-linux, contract-windows]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
