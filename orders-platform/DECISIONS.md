@@ -288,3 +288,46 @@ contrato (D6) pero **no hay consumidores** (`apps/` solo contiene `api`): es el
 momento más barato para cerrarlo. Matiza [D-014], que estableció `PUT`
 name+quantity. Si más adelante hace falta fijar un valor absoluto auditado, se
 agrega de forma aditiva al recurso de ajustes (`{"targetQuantity": n}`).
+
+## 2026-08-17 — Identidad del código verificado (github-26)
+
+### D-026 — La evidencia identifica el estado exacto verificado, no solo `HEAD`
+`./harness verify` registraba el commit `HEAD` aunque hubiera cambios sin
+commit, así que una evidencia podía parecer que correspondía a un commit limpio
+cuando se había verificado otra cosa. Ahora el harness calcula, **antes de
+ejecutar Maven**, un identificador determinista del árbol:
+
+```
+manifiesto = "<git-hash-object del contenido en disco> <path>" por archivo,
+             ls-files --cached (deduplicado) y luego --others --exclude-standard
+state      = git hash-object --stdin < manifiesto
+```
+
+`verification.json` sube a `schemaVersion 1.1` y añade un bloque `source` con
+`dirty`, `state`, `stateAlgorithm`, `scope`, `changedFiles` y `manifest`; el
+manifiesto se guarda como evidencia (`source-state.txt`), de modo que el
+identificador es **auditable y recomputable** con un solo comando de git. Con
+cambios locales, el directorio pasa a llamarse
+`<timestamp>-<sha>-dirty-<state7>` y la consola lo avisa al principio y al
+final. Alcance: todo el árbol versionable (tracked + untracked no ignorados);
+`artifacts/` y `target/` están en `.gitignore`, así que lo que genera la propia
+verificación no altera la identidad.
+
+**Por qué `git hash-object` y no `sha256sum`:** no escribe nada en el
+repositorio (verificado: 555 objetos antes y después), git ya es un requisito
+del harness — `sha256sum` no existe en macOS y en Windows haría falta
+`certutil`/PowerShell —, y aplica los filtros de git, así que un archivo con
+CRLF en Windows y LF en macOS produce el mismo hash. **Por qué el orden lo fija
+git y no `sort`:** el `sort` de Windows ordena según el locale, no byte-wise, y
+eso daría identificadores distintos para el mismo código; `git ls-files` emite
+cada grupo en orden byte-wise con el mismo código en toda plataforma.
+Descartados: `git stash create` (no incluye untracked) y el índice temporal con
+`write-tree` (identificador canónico y más rápido, pero **escribe blobs** en
+`.git/objects`).
+
+La paridad entre `./harness` y `harness.cmd` **se mide**: el workflow
+`harness-selftest.yml` calcula el `state` en `ubuntu-latest` y en
+`windows-latest` y falla si difieren. Se estrena `tests/` con
+`tests/harness/state_test.sh` (bash plano, sin dependencias nuevas) y el
+subcomando `./harness state`, que era la única forma de tener un RED antes del
+código sin esperar a Maven. Ver `specs/github-26/plan.md`.
