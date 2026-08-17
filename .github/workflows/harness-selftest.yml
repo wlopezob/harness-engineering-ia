@@ -118,6 +118,7 @@ jobs:
       - name: Run the contract suite against ./harness
         env:
           HARNESS_IMPL: bash
+          HARNESS_TEST_VERBOSE: "1"
         run: tests/harness/contract_test.sh
 
   contract-windows:
@@ -134,6 +135,7 @@ jobs:
         shell: bash
         env:
           HARNESS_IMPL: cmd
+          HARNESS_TEST_VERBOSE: "1"
         run: tests/harness/contract_test.sh
 
   parity:

@@ -97,6 +97,13 @@ run_harness() {
     cmd)  HARNESS_OUT="$( cd "${dir}" && timeout 120 cmd //c harness.cmd "$@" 2>&1 )" || HARNESS_RC=$? ;;
   esac
   HARNESS_OUT="${HARNESS_OUT//$'\r'/}"
+
+  # HARNESS_TEST_VERBOSE=1 vuelca cada corrida: en CI es la única forma de ver
+  # qué imprimió harness.cmd cuando una aserción falla en la otra plataforma
+  if [[ "${HARNESS_TEST_VERBOSE:-0}" == "1" ]]; then
+    printf '    $ %s %s  (rc=%s)\n' "${PROGRAM}" "$*" "${HARNESS_RC}"
+    printf '%s\n' "${HARNESS_OUT}" | sed 's/^/    | /'
+  fi
 }
 
 # argumentos que recibió el wrapper de mentira en el repo $1
