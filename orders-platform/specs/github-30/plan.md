@@ -312,11 +312,59 @@ test sale con 1 y `pipefail` + `set -e` mataban la suite. Arreglado con
   state-windows, contract-linux, contract-windows, parity, gate]` y
   `gate.needs` con los seis.
 
-### Verificación en GitHub (pendiente del push, tras aprobación)
+### Verificación en GitHub (PR #31)
 
-`Command contract (cmd)` en `windows-latest` es la primera ejecución real de
-`harness.cmd mutation`, del `help` nuevo, del comando desconocido y del
-`verify` con `pit-reports`. Lo que encuentre se documenta aquí (como en #26).
+Run `32083553470`: **7 jobs en success** — `Source state self-test` (las tres
+suites locales), `Source state (bash)`, `Source state (cmd)`, `bash and cmd
+agree on the state`, `Command contract (bash)` (14/14), `Command contract
+(cmd)` (**14/14 en `windows-latest`**) y el gate `Harness self-test`. Salida
+real de `harness.cmd` bajo Git Bash: `harness.cmd mutation` → `MUTATION
+RESULT: COMPLETED` + `Report: …\target\pit-reports\index.html` (rc 0);
+`harness.cmd verify` → `HARNESS RESULT: PASSED`, `Source: HEAD d82769f
+(working tree limpio)`, evidencia con `verification.json`,
+`source-state.txt`, `command.log` y `test-reports\pit-reports` (rc 0); `VERIFY`
+y `bogus` → rc 2 con el usage completo; `state --manifest` sin ruta → rc 2.
+
+## Lo que encontró el CI (y no se podía ver desde macOS)
+
+`Command contract (cmd)` falló tres veces antes de pasar. Las tres eran
+defectos reales de `harness.cmd`, no ruido, y **ninguno estaba en el
+inventario del plan**: `harness.cmd verify` nunca se había ejecutado en CI
+y `state` solo se había ejecutado desde `pwsh`.
+
+1. **`verify` y `state` se colgaban bajo Git Bash.** `compute_source_state`
+   contaba los archivos sucios con `… | find /c /v ""`. Bajo Git Bash el
+   PATH pone `usr\bin` delante de `System32`, así que `find` es el **GNU
+   find**, que toma `/c` como el directorio `C:\` y recorre el disco entero.
+   El primer run murió por el timeout del job (10 min) sin decir en qué test;
+   por eso `run_harness` envuelve ahora `cmd //c` en `timeout 120` (un cuelgue
+   es un FAIL con rc 124 que nombra el test). Y un paso de diagnóstico
+   temporal descartó a `powershell` (directo y en `for /f`) como culpable.
+   Arreglo: `%SystemRoot%\System32\find.exe` con ruta absoluta; el resto de
+   ejecutables externos del script (`git`, `powershell`, `xcopy`) no tienen
+   homónimo GNU. Afecta a cualquier usuario de Windows que ejecute
+   `harness.cmd` desde Git Bash, no solo al CI.
+2. **`verify` abortaba con 255 después de Maven.** `:calculate_duration`
+   hacía `set /a START_TOTAL=(((1%A-100)*60+…))` dentro de un bloque `( … )`
+   de `for`; cmd toma el primer `)` de la aritmética como cierre del bloque
+   y aborta el batch con `*60+(1%B-100))*60+(1%C-100)) was unexpected at
+   this time` — sin `HARNESS RESULT` ni `verification.json`. Es el idioma
+   documentado de batch: la expresión va entre comillas, `set /a "X=(…)"`.
+   Roto desde su origen.
+3. **`state --manifest` sin ruta devolvía 0.** El `exit /b 2` estaba en un
+   `if` anidado dentro de otro `if` y llegó como 0 al proceso `cmd /c`; el
+   mismo `exit /b 2` en un bloque simple (`mutation` sin wrapper) sí
+   propaga. Ahora salta con `goto` a una etiqueta de nivel superior, el
+   patrón que ya usan `help` y el comando desconocido.
+
+Y un defecto de la propia suite que Windows destapó: `evidence_dir_of`
+(`find … | head -1` en una asignación) mataba el runner bajo `pipefail`
+cuando `artifacts/harness` no existía — que es justo lo que pasa cuando
+`verify` se cuelga antes del `mkdir`. `state_test.sh` tenía una copia
+idéntica con el mismo bug latente; ahora es una sola función en `testlib.sh`
+con `|| true`. También se añadió `HARNESS_TEST_VERBOSE=1` en los jobs de
+contrato: sin volcar la salida real de `harness.cmd`, los mensajes de
+aserción no bastaban para diagnosticar desde macOS.
 
 ## Desviaciones respecto al plan
 
@@ -325,3 +373,10 @@ test sale con 1 y `pipefail` + `set -e` mataban la suite. Arreglado con
 2. La suite de contrato tiene **14 casos** en vez de los 8 enumerados (6–13):
    se separaron por comando los casos "sin wrapper" (`mutation`, `format`,
    `verify`) y los de fallo de Maven, para que un rojo nombre el comando.
+3. **Tres arreglos en `harness.cmd` que el plan no preveía** (`find.exe`
+   absoluto, `set /a` entrecomillado, `exit /b` fuera del `if` anidado) y dos
+   en la suite (`timeout` en `run_harness`, `evidence_dir_of` compartido y
+   tolerante). Todos salieron del job de Windows; ver "Lo que encontró el
+   CI". El inventario de divergencias del plan era de **contrato**; estos son
+   defectos de **ejecución** que solo aparecen al ejecutar de verdad — que es
+   la tesis del issue.

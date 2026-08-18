@@ -421,4 +421,15 @@ Windows; se quitó el `/I`. **Por qué se igualó hacia el banner `FAILED`:**
 bash abortaba por `set -e` con el exit code correcto pero sin resultado
 principal; se alineó al lado más informativo sin cambiar ningún exit code.
 Fuera de alcance mantenido: `mutation` no genera evidencia ni corre en cada
-PR y nada de PIT cambia. Ver `specs/github-30/plan.md`.
+PR y nada de PIT cambia.
+
+**Lo que demostró ejecutar de verdad:** el job de Windows encontró tres
+defectos de `harness.cmd` que ninguna inspección de texto habría visto —
+`find` resolvía al GNU find bajo Git Bash y recorría `C:\` entero (ahora
+`%SystemRoot%\System32\find.exe`), un `set /a` con paréntesis dentro de un
+bloque abortaba `verify` con 255 (ahora entre comillas) y un `exit /b 2` en un
+`if` anidado llegaba como 0 a `cmd /c` (ahora `goto` a una etiqueta de nivel
+superior). Regla que queda: **en `harness.cmd`, ejecutables externos con
+homónimo GNU van con ruta absoluta, la aritmética de `set /a` va entre
+comillas, y los `exit /b` con código van en nivel superior.** Ver
+`specs/github-30/plan.md`.
