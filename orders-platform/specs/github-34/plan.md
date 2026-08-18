@@ -267,8 +267,114 @@ validaron antes de implementar.
 
 ## Resultado
 
-_(se completa al terminar la implementación)_
+### Ciclo TDD (rojos observados, en orden)
+
+| # | Rojo real | Green |
+| - | --------- | ----- |
+| 1 | `FAIL: mutation debe dejar un directorio de evidencia (vacío)` | directorio `<ts>-<sha>-mutation` + `mutation.json` con schema/comando/componente |
+| 2 | `durationSeconds numérico (esperado: 'number', obtenido: 'null')` ×9 | instantes, duración medida, git y `result` en el documento |
+| 3 | `la evidencia debe conservar el log de Maven/PIT` + `debe copiar target/pit-reports` | `tee command.log`, `copy_pit_reports`, referencias en `evidence` |
+| 4 | `la evidencia debe incluir mutation.json` con PIT saliendo 3 | un solo cierre para éxito y fallo (antes el fallo salía antes de escribir nada) |
+| 5 | `la evidencia debe declarar el código de antes de correr PIT (esperado '66f71cf…', obtenido 'null')` | `compute_source_state` antes de Maven + manifiesto copiado |
+| 6 | `el motivo del fallo debe quedar en command.log` (sin Maven Wrapper) | validaciones previas escriben log y documento con `exitCode 2` |
+| 7 | `el nombre del directorio no puede parecer un análisis del commit limpio (no contiene '-dirty-c68ec17-mutation')` | nombre con `-dirty-<state7>` también en mutation |
+| 8 | `harness.cmd debe escribir el documento de mutation (vacío)` | `:mutation` con evidencia, `:copy_pit_reports`, `:write_mutation_json` |
+
+Dos rojos se endurecieron **antes** de implementar, porque tal como estaban
+escritos habrían pasado con el campo ausente:
+
+* `jq` imprime `null` para un campo que no existe y `assert_not_empty` lo daba
+  por bueno → nuevo `assert_json_value`, que rechaza vacío y `null`. El rojo 2
+  pasó de 5 a 9 aserciones fallidas.
+* el wrapper de Maven de mentira no imprimía nada, así que "conserva el log"
+  se habría cumplido con un `command.log` vacío → ahora imprime un marcador y
+  el test exige que el log **contenga la salida de Maven**.
+
+Refactor con la suite en verde: `verify` y `mutation` compartían ~40 líneas de
+arranque de corrida → `start_run_evidence <sufijo>` y `print_run_header
+<título>` en bash, `:resolve_environment` en cmd. Mismas 53 pruebas verdes
+antes y después.
+
+### Mutantes (batería a mano, sin PIT para los scripts)
+
+| Mutante | Resultado |
+| ------- | --------- |
+| sin sufijo `-mutation` en el directorio | muerto (contract) |
+| el manifiesto no se conserva | muerto (contract, state) |
+| la identidad se calcula DESPUÉS de Maven | muerto (contract) |
+| `mutation` siempre dice `COMPLETED` | muerto (contract) |
+| el log de PIT no se conserva | muerto (contract) |
+| los reportes de PIT no se copian | muerto (contract) |
+| duración siempre 0 | muerto (contract) |
+| el árbol sucio no se ve en el nombre | muerto (contract, state) |
+| el fallo previo a Maven no deja documento | muerto (contract) |
+| cmd olvida un campo del documento | muerto (parity) |
+| cmd declara otro `schemaVersion` | muerto (parity) |
+| **cmd escribe el documento en `verification.json`** | **VIVO en la primera pasada** |
+
+El superviviente era un hueco real: la paridad estática comparaba el
+**contenido** del documento pero no **a qué archivo** lo escribía cada script,
+así que `harness.cmd` podría haber dejado la evidencia de mutation haciéndose
+pasar por la de un `verify`, y solo lo habría cazado el job de Windows. Se
+añadió la aserción del nombre del archivo en las dos implementaciones y el
+mutante muere en ambos lados: 12/12.
+
+### Verificación local (D4)
+
+```
+tests/harness/state_test.sh          16 passed, 0 failed
+tests/harness/contract_test.sh       21 passed, 0 failed   (HARNESS_IMPL=bash)
+tests/harness/parity_test.sh          6 passed, 0 failed
+tests/harness/selftest_gate_test.sh  10 passed, 0 failed
+```
+
+Corrida real de `./harness mutation` sobre el backend:
+
+```
+>> Generated 47 mutations Killed 44 (94%)
+>> Line Coverage (for mutated classes only): 118/120 (98%)
+[INFO] BUILD SUCCESS
+ MUTATION RESULT: COMPLETED
+ Evidence: artifacts/harness/20260818T113755Z-dd7ba01-dirty-2753cde-mutation
+```
+
+`./harness verify` sin regresión (la evidencia existente sigue igual, con el
+refactor por debajo):
+
+```
+[INFO] Tests run: 90, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS
+ HARNESS RESULT: PASSED
+ Evidence: artifacts/harness/20260818T113858Z-dd7ba01-dirty-2753cde
+verification.json → schemaVersion 1.1, result PASSED, exitCode 0, durationSeconds 18
+```
+
+La evidencia de mutation contiene `command.log` (169 líneas, la salida completa de PIT),
+`pit-reports/` (con `index.html`, `mutations.xml` y las páginas por paquete),
+`source-state.txt` (138 líneas) y `mutation.json`. El manifiesto conservado
+**reproduce** el identificador declarado:
+
+```
+declarado:   2753cde7d80e619d58563b47b0c8c2339a0a0906
+recomputado: 2753cde7d80e619d58563b47b0c8c2339a0a0906   (git hash-object --stdin < source-state.txt)
+```
 
 ## Desviaciones respecto al plan
 
-_(se completa al terminar la implementación)_
+* **El `help` no se tocó.** El plan preveía mencionar la evidencia en la
+  descripción de `mutation`; `verify` genera evidencia desde #26 y su línea
+  tampoco la menciona, así que hacerlo solo en `mutation` habría quedado
+  incoherente. Cada comando ya imprime `Evidence:` al ejecutarse.
+* **Herramienta de test más allá de lo planeado.** Además de generalizar
+  `assert_verification_json` a `assert_run_json`, hizo falta `assert_json_value`
+  (un campo ausente no puede pasar por presente), enseñar rutas anidadas
+  (`.git.commit`, `.source.state`) al fallback de `python3` —no se puede dar por
+  hecho `jq` en el runner de Windows— y que `json_query` no ensucie el log con
+  el error de redirección cuando el documento no existe.
+* **El refactor alcanzó a `harness.cmd`.** El plan solo proponía extraer en
+  bash; la resolución del entorno (`CI`, `githubRunId`, `githubRunAttempt`) se
+  extrajo también en cmd a `:resolve_environment`, compartida por `verify` y
+  `mutation`, para que no pueda divergir entre comandos.
+* **Un caso de test más de los previstos.** El mutante superviviente obligó a
+  añadir la comparación del nombre del archivo del documento, que el plan no
+  contemplaba.
