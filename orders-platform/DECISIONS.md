@@ -496,3 +496,95 @@ SpotBugs reconoce en el accessor de un record.
 Sin migración Flyway: el lote no añade tablas ni columnas. Sigue vigente D-021
 (read-modify-write sin bloqueo), ahora sobre N productos; el issue deja fuera
 idempotencia, ejecución parcial y concurrencia. Ver `specs/github-32/plan.md`.
+
+## 2026-08-18 — Evidencia estructurada del mutation testing (github-34)
+
+### D-030 — Una corrida de `mutation` deja evidencia auditable, igual que un `verify`
+`harness mutation` ejecutaba PIT y dejaba el resultado en `target/pit-reports`:
+después no se podía responder qué código exacto se analizó, si el árbol estaba
+limpio, sobre qué commit, cuándo, si PIT terminó bien ni dónde quedaron los
+reportes — justo lo que `verify` sí contesta desde D-026. Ahora `mutation`
+captura la identidad del código **antes** de lanzar Maven (el mismo
+`source.state`) y deja en
+`artifacts/harness/<ts>-<sha>[-dirty-<state7>]-mutation/`: `command.log` con la
+salida completa de Maven/PIT, `pit-reports/` con el reporte copiado, el
+manifiesto `source-state.txt` y el documento `mutation.json`, que registra
+schema, comando, componente, resultado, exit code, inicio, fin, duración, git,
+identidad del source y las referencias a esa evidencia. El exit code de PIT se
+sigue propagando tal cual.
+
+**Por qué la identidad se captura al principio:** PIT escribe durante la
+corrida, y un `state` calculado al final describiría un árbol que ya incluye lo
+que generó la propia herramienta. Capturarlo antes es lo que hace que la
+evidencia diga *qué se analizó* y no *qué quedó después*. La suite lo prueba
+con un Maven de mentira que crea un archivo **no ignorado** mientras corre:
+si el cálculo se moviera al final, el caso se pone rojo.
+
+**Por qué un documento propio (`mutation.json`, `schemaVersion 1.0`) y no
+`verification.json`:** el tipo de evidencia se reconoce por el nombre del
+archivo, sin leer un campo, y un glob sobre `artifacts/harness/*` no mezcla dos
+tipos. Nace en `1.0` —y no en el `1.1` de `verify`— porque acoplar las dos
+numeraciones obligaría a tocar un documento cada vez que evolucione el otro.
+**Por qué el sufijo `-mutation` y no un subárbol `artifacts/harness/mutation/`:**
+el timestamp va delante, así que toda la evidencia del harness sigue ordenada
+cronológicamente en un solo sitio y el nombre dice qué comando la produjo; el
+bloque `-dirty-<state7>` conserva el significado de D-026.
+**Por qué `result: COMPLETED/FAILED`:** es exactamente lo que imprime el banner
+del comando; usar `PASSED` habría creado dos vocabularios para un mismo
+resultado. **Por qué también hay evidencia cuando falla:** el fallo de PIT (no
+alcanzar el threshold) y el fallo previo a Maven (backend o wrapper ausentes,
+exit 2) son justo las corridas que hay que poder auditar; una corrida que falló
+no puede quedar sin rastro.
+
+**Lo que NO cambia:** nada de PIT (goals, thresholds, paquetes analizados,
+operadores), `mutation` sigue sin ejecutarse en cada PR, y el bloque
+`environment` sigue siendo el mínimo de D-026 (CI y run id) — la identidad
+completa del entorno de ejecución (JDK, Maven, SO, versión de PIT) es otro work
+item, no se inventa aquí.
+
+**Cómo se prueba:** las garantías viven en `tests/harness/contract_test.sh`,
+**una sola suite** que en CI corre contra `./harness` en `ubuntu-latest` y
+contra `harness.cmd` en `windows-latest` (D-028), así que "bash y Windows
+producen evidencia equivalente" es una aserción ejecutada, no una promesa. La
+paridad **estática** compara además, sin ejecutar nada, el conjunto y el orden
+de los campos del documento que escribe cada script: añadir un campo en una
+implementación y no en la otra falla en local, sin esperar a Windows. Como los
+self-tests del harness no tienen mutation testing, los casos nuevos se
+comprobaron con una batería de mutantes a mano sobre los dos scripts.
+
+**El reporte adjunto es el de esta corrida, no el que quedó en `target/`:**
+`mutation` no ejecuta `clean`, así que copiar `target/pit-reports` "si existe"
+adjuntaba el reporte de la corrida anterior cuando esta fallaba antes de que
+PIT escribiera (p. ej. en `test-compile`) — evidencia con el `source.state` del
+código B junto al reporte del código A, el mismo pecado que este trabajo vino a
+corregir. Ahora el directorio se **descarta antes de lanzar Maven**: lo que
+quede después es de esta corrida por construcción, sin heurísticas (descartadas
+comparar marcas de tiempo, que no prueban autoría, y deducirlo del texto que
+imprime PIT). Y `evidence.pitReports` vale `null` cuando no hubo reporte:
+prometer un directorio que no existe es afirmar una evidencia que nadie
+produjo. Nada de PIT cambia; `verify` no tenía el problema porque ejecuta
+`clean`. El descarte va **antes de cualquier validación**, no solo antes de
+Maven: todos los caminos del comando —incluido el que sale con 2 sin llegar a
+ejecutarlo— terminan en el mismo cierre, que copia lo que haya en `target/`, así
+que una limpieza colocada dentro de una rama deja el resto de caminos
+descubiertos. La garantía tiene que vivir antes de la bifurcación, no dentro de
+una rama. Lo destapó la revisión del PR, no el CI: el caso solo aparece cuando
+la corrida falla **antes** de PIT, que es justo el camino que la suite no
+recorría.
+
+**Lo que demostró ejecutar de verdad, otra vez:** el primer push dejó rojos los
+dos jobs de contrato con el mismo fallo, y no era del harness sino de la suite:
+un helper nuevo capturaba el stdout de `run_harness`, que con
+`HARNESS_TEST_VERBOSE=1` —lo que usan los dos jobs— lleva el volcado de la
+corrida entera, así que comparaba el dump en vez del identificador. En local,
+sin esa variable, todo estaba verde. Ahora el volcado va a **stderr**, de forma
+que ningún helper pueda arrastrarlo dentro de un valor, y el helper deja su
+resultado en una variable en vez de en stdout (lo que además evita que la
+subshell se trague sus aserciones). Regla que queda: **una suite que solo se
+ejecuta en un modo no está probada en el otro**; el contrato se corre en local
+con y sin `HARNESS_TEST_VERBOSE=1`.
+
+Refactor incluido: `verify` y `mutation` comparten en bash el arranque de la
+corrida (`start_run_evidence`, `print_run_header`) y en cmd la resolución del
+entorno (`:resolve_environment`), para que la evidencia de los dos comandos no
+pueda divergir por descuido. Ver `specs/github-34/plan.md`.
