@@ -477,6 +477,12 @@ mutation_backend() {
 
   print_run_header "mutation testing"
 
+  # antes de CUALQUIER validación: todos los caminos terminan en el mismo
+  # cierre, que copia lo que haya en target/. Descartarlo más tarde dejaría que
+  # el camino de exit 2 —que ni siquiera llama a Maven— adjuntara el reporte de
+  # la corrida anterior.
+  discard_stale_pit_reports
+
   # un fallo previo a Maven también es una corrida: su motivo va al log y el
   # documento se escribe igual, con exit code 2
   if [[ ! -d "${API_DIR}" ]]; then
@@ -491,8 +497,6 @@ mutation_backend() {
     exit_code=2
   else
     chmod +x "${API_DIR}/mvnw"
-
-    discard_stale_pit_reports
 
     # el exit code de Maven se propaga tal cual; el banner es el mismo que en
     # harness.cmd (paridad de resultado principal, github-30)

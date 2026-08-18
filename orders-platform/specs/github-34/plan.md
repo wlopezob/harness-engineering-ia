@@ -89,8 +89,10 @@ que falló nunca queda sin rastro.
 
 ### 5. Solo se adjunta el reporte que produjo esta corrida
 
-`target/pit-reports` se borra **antes** de lanzar Maven; después, lo que haya
-es de esta corrida por construcción, sin heurísticas. Descartadas: comparar la
+`target/pit-reports` se borra **antes de cualquier validación**, no solo antes
+de lanzar Maven: todos los caminos —incluido el que sale con 2 sin llegar a
+Maven— terminan en el mismo cierre, que copia lo que haya en `target/`.
+Después, lo que exista es de esta corrida por construcción, sin heurísticas. Descartadas: comparar la
 marca de tiempo del directorio antes y después (que algo se modifique no prueba
 que lo produjera esta corrida, y comparar fechas en batch depende del locale) y
 deducir del log si PIT llegó a ejecutarse (acopla el harness al texto que
@@ -246,6 +248,8 @@ que obliga a implementar el lado cmd sin esperar a CI.
 | 7 | contract | `verify` y `mutation` en el mismo repo dejan **dos** directorios distinguibles, cada uno con su JSON; con árbol sucio el de mutation es `…-dirty-<state7>-mutation` y `source.dirty` es `true` | se pisarían / no habría sufijo |
 | 8 | parity | los dos scripts escriben el mismo documento: mismas claves, mismo `schemaVersion`, mismas referencias de `evidence` | `harness.cmd` no escribe ninguno |
 | 9 | contract | con un reporte de una corrida anterior en `target/` y una corrida que falla antes de que PIT escriba, la evidencia no contiene ese reporte ni lo promete en el documento (añadido en la revisión del PR) | se copiaba el reporte viejo y `pitReports` decía `"pit-reports"` |
+| 10 | contract | con reporte anterior en `target/` y **sin Maven Wrapper**: exit 2, evidencia creada, ningún `pit-reports` copiado y `pitReports` a `null` (añadido en la segunda revisión del PR) | el descarte vivía detrás de las validaciones, así que ese camino adjuntaba el reporte viejo |
+| 11 | parity | el descarte del reporte previo aparece **antes** que la primera validación en los dos scripts | en ambos aparecía después |
 
 Triangulación prevista: el caso 4 elimina la implementación que solo funciona
 en el camino feliz; el 5, la que calcula el estado al final; el 7, la que
@@ -414,6 +418,34 @@ descartar el reporte previo. Batería de esta vuelta: 5/5 mutantes muertos
 (bash sin descarte, bash afirmando siempre, bash copiando lo que no es de la
 corrida, cmd sin descarte, cmd afirmando siempre) — los dos de cmd mueren en
 local, sin esperar a Windows.
+
+### Tercera vuelta: el camino que no llama a Maven
+
+La segunda revisión encontró que el descarte se ejecutaba **después** de validar
+el Maven Wrapper, y que el camino de exit 2 —que no llega a Maven— sigue pasando
+por el cierre que copia reportes: con un `target/pit-reports` de otra corrida,
+la evidencia lo adjuntaba y el documento lo prometía. Rojo primero, en las dos
+capas:
+
+```
+- test_mutation_sin_wrapper_no_adjunta_el_reporte_de_una_corrida_anterior
+  FAIL: una corrida que no ejecutó PIT no puede adjuntar reportes
+  FAIL: mutation.json debe declarar que esta corrida no dejó reporte
+        (esperado: 'null', obtenido: 'pit-reports')
+
+- test_el_descarte_del_reporte_previo_va_antes_de_toda_validacion
+  FAIL: ./harness descarta el reporte previo DESPUÉS de validar: el camino de exit 2 lo adjunta
+  FAIL: harness.cmd descarta el reporte previo DESPUÉS de validar: el camino de exit 2 lo adjunta
+```
+
+Green: el descarte sube a la primera línea del comando, antes de toda
+validación, en las dos implementaciones. Batería: 4/4 muertos, incluido el
+mutante que reproduce exactamente la regresión (mover el descarte detrás de las
+validaciones), que muere en local también en el lado cmd.
+
+Lección que queda: **la garantía no puede vivir en un camino, tiene que vivir
+antes de la bifurcación.** Si el cierre es común a todos los caminos, la
+limpieza también tiene que serlo.
 
 ### Lo que encontró el CI (y no se veía en local)
 

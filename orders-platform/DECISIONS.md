@@ -563,7 +563,12 @@ comparar marcas de tiempo, que no prueban autoría, y deducirlo del texto que
 imprime PIT). Y `evidence.pitReports` vale `null` cuando no hubo reporte:
 prometer un directorio que no existe es afirmar una evidencia que nadie
 produjo. Nada de PIT cambia; `verify` no tenía el problema porque ejecuta
-`clean`. Lo destapó la revisión del PR, no el CI: el caso solo aparece cuando
+`clean`. El descarte va **antes de cualquier validación**, no solo antes de
+Maven: todos los caminos del comando —incluido el que sale con 2 sin llegar a
+ejecutarlo— terminan en el mismo cierre, que copia lo que haya en `target/`, así
+que una limpieza colocada dentro de una rama deja el resto de caminos
+descubiertos. La garantía tiene que vivir antes de la bifurcación, no dentro de
+una rama. Lo destapó la revisión del PR, no el CI: el caso solo aparece cuando
 la corrida falla **antes** de PIT, que es justo el camino que la suite no
 recorría.
 

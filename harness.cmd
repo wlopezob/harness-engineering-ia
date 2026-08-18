@@ -364,6 +364,13 @@ echo.
 
 set "EXIT_CODE=0"
 
+rem mutation no ejecuta `clean`, asi que el reporte que quede en target\ es de
+rem una corrida anterior. Se descarta antes de CUALQUIER validacion: todos los
+rem caminos terminan en :mutation_finalize, que copia lo que haya en target\,
+rem asi que descartarlo mas tarde dejaria que el camino de exit 2 —que ni
+rem siquiera llama a Maven— adjuntara el reporte de la corrida anterior.
+if exist "%API_DIR%\target\pit-reports" rmdir /S /Q "%API_DIR%\target\pit-reports"
+
 rem un fallo previo a Maven tambien es una corrida: su motivo va al log y el
 rem documento se escribe igual, con exit code 2
 if not exist "%API_DIR%" (
@@ -379,11 +386,6 @@ if not exist "%API_DIR%\mvnw.cmd" (
     set "EXIT_CODE=2"
     goto mutation_finalize
 )
-
-rem mutation no ejecuta `clean`, asi que el reporte que quede en target\ es de
-rem una corrida anterior. Si esta falla antes de que PIT escriba (p. ej. en
-rem test-compile), adjuntarlo diria que se analizo un codigo que no se analizo.
-if exist "%API_DIR%\target\pit-reports" rmdir /S /Q "%API_DIR%\target\pit-reports"
 
 pushd "%API_DIR%"
 

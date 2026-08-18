@@ -453,6 +453,39 @@ test_mutation_no_adjunta_el_reporte_de_una_corrida_anterior() {
   fi
 }
 
+test_mutation_sin_wrapper_no_adjunta_el_reporte_de_una_corrida_anterior() {
+  local dir evidence json referencia
+  dir="$(new_repo)"
+
+  # reporte de una corrida anterior, todavía en target/
+  mkdir -p "${dir}/${API_REL}/target/pit-reports"
+  printf '<html>REPORTE-VIEJO</html>\n' > "${dir}/${API_REL}/target/pit-reports/index.html"
+
+  # y esta corrida ni siquiera llega a Maven: falla en la validación previa
+  rm -f "${dir}/${API_REL}/mvnw" "${dir}/${API_REL}/mvnw.cmd"
+  run_harness "${dir}" mutation
+  assert_equals "2" "${HARNESS_RC}" "sin Maven Wrapper mutation debe salir con 2"
+
+  evidence="$(evidence_dir_of "${dir}" mutation)"
+  assert_not_empty "${evidence}" "el fallo previo a Maven también deja evidencia"
+
+  if [[ -n "${evidence}" ]]; then
+    # el camino que no ejecuta PIT es el que más fácil adjunta un reporte ajeno
+    if [[ -d "${evidence}/pit-reports" ]]; then
+      fail "una corrida que no ejecutó PIT no puede adjuntar reportes"
+    fi
+    if [[ -d "${evidence}/pit-reports" ]] \
+      && grep -rq "REPORTE-VIEJO" "${evidence}/pit-reports" 2>/dev/null; then
+      fail "y menos el de una corrida anterior"
+    fi
+
+    json="${evidence}/mutation.json"
+    referencia="$(json_query "${json}" ".evidence.pitReports" || true)"
+    assert_equals "null" "${referencia}" \
+      "mutation.json debe declarar que esta corrida no dejó reporte"
+  fi
+}
+
 test_la_evidencia_de_mutation_describe_el_codigo_de_antes_de_correr_pit() {
   local dir before after evidence json declared recomputed
   dir="$(new_repo)"
@@ -694,6 +727,7 @@ run_test test_mutation_conserva_el_log_y_los_reportes_de_pit
 run_test test_mutation_falla_con_el_exit_code_de_maven
 run_test test_mutation_deja_evidencia_cuando_pit_falla
 run_test test_mutation_no_adjunta_el_reporte_de_una_corrida_anterior
+run_test test_mutation_sin_wrapper_no_adjunta_el_reporte_de_una_corrida_anterior
 run_test test_la_evidencia_de_mutation_describe_el_codigo_de_antes_de_correr_pit
 run_test test_mutation_sin_wrapper_falla_con_2_y_deja_evidencia
 run_test test_verify_y_mutation_no_se_pisan_la_evidencia

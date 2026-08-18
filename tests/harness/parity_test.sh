@@ -100,6 +100,28 @@ json_keys() {
   sed -n 's/^[[:space:]]*"\([A-Za-z]\{1,\}\)":.*/\1/p' | as_line
 }
 
+# cuerpo del comando mutation en cada script, para poder razonar sobre el orden
+bash_mutation_body() {
+  awk '
+    /^mutation_backend\(\) \{/ { infn = 1 }
+    infn                        { print }
+    infn && /^}/                { exit }
+  ' "${BASH_SCRIPT}"
+}
+
+cmd_mutation_body() {
+  awk '
+    /^:mutation$/                    { inlabel = 1 }
+    inlabel                          { print }
+    inlabel && /^exit \/b %EXIT_CODE%$/ { exit }
+  ' "${CMD_SCRIPT}"
+}
+
+# número de línea del primer match de $2 dentro del bloque $1 (vacío si no hay)
+line_of() {
+  printf '%s\n' "$1" | grep -n -- "$2" | head -1 | cut -d: -f1
+}
+
 # valor tal cual (sin desenvolver comillas) de una clave del documento
 json_value_of() {
   sed -n "s/^[[:space:]]*\"$1\": *\(.*\)$/\1/p" | head -1 | sed 's/,$//'
@@ -290,6 +312,31 @@ test_ninguno_afirma_el_reporte_de_pit_sin_calcularlo() {
   fi
 }
 
+test_el_descarte_del_reporte_previo_va_antes_de_toda_validacion() {
+  local body descarte validacion
+
+  # el fallo previo a Maven termina igual en el cierre que copia reportes: si
+  # el descarte vive detrás de las validaciones, ese camino adjunta el reporte
+  # de la corrida anterior
+  body="$(bash_mutation_body)"
+  descarte="$(line_of "${body}" 'discard_stale_pit_reports')"
+  validacion="$(line_of "${body}" 'Backend directory not found')"
+  assert_not_empty "${descarte}" "./harness mutation debe descartar el reporte previo"
+  assert_not_empty "${validacion}" "./harness mutation debe validar el backend"
+  if [[ -n "${descarte}" && -n "${validacion}" && "${descarte}" -gt "${validacion}" ]]; then
+    fail "./harness descarta el reporte previo DESPUÉS de validar: el camino de exit 2 lo adjunta"
+  fi
+
+  body="$(cmd_mutation_body)"
+  descarte="$(line_of "${body}" 'rmdir /S /Q')"
+  validacion="$(line_of "${body}" 'Backend directory not found')"
+  assert_not_empty "${descarte}" "harness.cmd mutation debe descartar el reporte previo"
+  assert_not_empty "${validacion}" "harness.cmd mutation debe validar el backend"
+  if [[ -n "${descarte}" && -n "${validacion}" && "${descarte}" -gt "${validacion}" ]]; then
+    fail "harness.cmd descarta el reporte previo DESPUÉS de validar: el camino de exit 2 lo adjunta"
+  fi
+}
+
 echo "=================================================="
 echo " Harness self-test: bash/cmd static parity"
 echo "=================================================="
@@ -301,5 +348,6 @@ run_test test_cada_comando_invoca_maven_con_los_mismos_argumentos
 run_test test_cada_script_usa_el_wrapper_de_su_plataforma
 run_test test_ambos_escriben_el_mismo_documento_de_mutation
 run_test test_ninguno_afirma_el_reporte_de_pit_sin_calcularlo
+run_test test_el_descarte_del_reporte_previo_va_antes_de_toda_validacion
 
 finish_suite
