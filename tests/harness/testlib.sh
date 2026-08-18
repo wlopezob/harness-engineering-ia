@@ -81,12 +81,21 @@ run_test() {
   fi
 }
 
-# Directorio de evidencia de la única corrida del repo temporal $1 (vacío si no
-# hay ninguna). El `|| true` importa: si artifacts/harness no existe, find sale
-# con 1 y, en una asignación bajo pipefail, mataría el runner en vez de dejar
-# un FAIL legible.
+# Directorio de evidencia del repo temporal $1 (vacío si no hay ninguno). $2
+# acota qué comando lo produjo: "mutation" (los que llevan el sufijo) o
+# "verify" (los que no); sin $2, el primero que haya. El `|| true` importa: si
+# artifacts/harness no existe, find sale con 1 y, en una asignación bajo
+# pipefail, mataría el runner en vez de dejar un FAIL legible.
 evidence_dir_of() {
-  find "$1/artifacts/harness" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -1 || true
+  local dirs
+  dirs="$(find "$1/artifacts/harness" -mindepth 1 -maxdepth 1 -type d 2>/dev/null \
+    | LC_ALL=C sort || true)"
+
+  case "${2:-}" in
+    mutation) printf '%s\n' "${dirs}" | grep -- '-mutation$' | head -1 || true ;;
+    verify)   printf '%s\n' "${dirs}" | grep -v -- '-mutation$' | head -1 || true ;;
+    *)        printf '%s\n' "${dirs}" | head -1 || true ;;
+  esac
 }
 
 # Imprime el resumen y termina con 1 si algún test falló.

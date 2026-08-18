@@ -60,6 +60,51 @@ cmd_help_text() {
   ' "${CMD_SCRIPT}" | sed 's/\^\(.\)/\1/g'
 }
 
+# cuerpo del documento mutation.json tal cual lo escribe ./harness (el heredoc
+# de write_mutation_report)
+bash_mutation_json() {
+  awk '
+    /^write_mutation_report\(\) \{/     { infn = 1; next }
+    infn && /<<EOF$/                   { intext = 1; next }
+    infn && intext && /^EOF$/          { exit }
+    infn && intext                     { print }
+  ' "${BASH_SCRIPT}"
+}
+
+# lo mismo en harness.cmd: los `echo` de la subrutina :write_mutation_json
+cmd_mutation_json() {
+  awk '
+    /^:write_mutation_json$/     { inlabel = 1; next }
+    inlabel && /^exit \/b/       { exit }
+    inlabel && /^ *echo\.$/      { print ""; next }
+    inlabel && /^ *echo /        { sub(/^ *echo /, ""); print }
+  ' "${CMD_SCRIPT}" | sed 's/\^\(.\)/\1/g'
+}
+
+# archivo al que cada script escribe el documento de mutation
+bash_mutation_json_file() {
+  awk '
+    /^write_mutation_report\(\) \{/ { infn = 1 }
+    infn && /^ *cat > /              { print; exit }
+  ' "${BASH_SCRIPT}" \
+    | sed 's|.*/\([A-Za-z.]\{1,\}\)" <<EOF$|\1|'
+}
+
+cmd_mutation_json_file() {
+  sed -n 's|^set "MUTATION_FILE=!EVIDENCE_DIR!.\([A-Za-z.]\{1,\}\)"$|\1|p' "${CMD_SCRIPT}" \
+    | head -1
+}
+
+# claves del documento en el orden en que se escriben, incluidas las anidadas
+json_keys() {
+  sed -n 's/^[[:space:]]*"\([A-Za-z]\{1,\}\)":.*/\1/p' | as_line
+}
+
+# valor de una clave escalar del documento
+json_literal() {
+  sed -n "s/^[[:space:]]*\"$1\": *\"\([^\"]*\)\".*/\1/p" | head -1
+}
+
 # --- helpers comunes ---------------------------------------------------------
 
 # comandos que aparecen en las líneas "Usage:" de un texto de help ($1 = programa)
@@ -178,6 +223,41 @@ test_cada_script_usa_el_wrapper_de_su_plataforma() {
   fi
 }
 
+test_ambos_escriben_el_mismo_documento_de_mutation() {
+  local bash_json cmd_json bash_keys cmd_keys bash_schema cmd_schema bash_cmdline cmd_cmdline
+  local bash_file cmd_file
+  bash_json="$(bash_mutation_json)"
+  cmd_json="$(cmd_mutation_json)"
+
+  bash_keys="$(printf '%s\n' "${bash_json}" | json_keys)"
+  cmd_keys="$(printf '%s\n' "${cmd_json}" | json_keys)"
+
+  assert_not_empty "${bash_keys}" "./harness debe escribir el documento de mutation"
+  assert_not_empty "${cmd_keys}" "harness.cmd debe escribir el documento de mutation"
+  assert_equals "${bash_keys}" "${cmd_keys}" \
+    "las dos implementaciones deben registrar los mismos campos, en el mismo orden"
+
+  # el contenido no basta: escribirlo en verification.json lo haría pasar por
+  # la evidencia de otro comando (mutante que sobrevivió a la primera batería)
+  bash_file="$(bash_mutation_json_file)"
+  cmd_file="$(cmd_mutation_json_file)"
+  assert_equals "mutation.json" "${bash_file}" "./harness debe escribir mutation.json"
+  assert_equals "mutation.json" "${cmd_file}" "harness.cmd debe escribir mutation.json"
+
+  bash_schema="$(printf '%s\n' "${bash_json}" | json_literal schemaVersion)"
+  cmd_schema="$(printf '%s\n' "${cmd_json}" | json_literal schemaVersion)"
+  assert_not_empty "${bash_schema}" "el documento debe declarar su esquema"
+  assert_equals "${bash_schema}" "${cmd_schema}" \
+    "un mismo documento no puede declarar dos esquemas según la plataforma"
+
+  # única diferencia admitida: cómo se llama cada script a sí mismo
+  bash_cmdline="$(printf '%s\n' "${bash_json}" | json_literal command)"
+  cmd_cmdline="$(printf '%s\n' "${cmd_json}" | json_literal command | sed 's|harness\.cmd|./harness|')"
+  assert_not_empty "${bash_cmdline}" "el documento debe registrar el comando ejecutado"
+  assert_equals "${bash_cmdline}" "${cmd_cmdline}" \
+    "el comando registrado debe ser el mismo módulo el nombre del programa"
+}
+
 echo "=================================================="
 echo " Harness self-test: bash/cmd static parity"
 echo "=================================================="
@@ -187,5 +267,6 @@ run_test test_el_help_de_cada_script_lista_exactamente_lo_que_despacha
 run_test test_el_texto_del_help_es_el_mismo_modulo_el_nombre_del_programa
 run_test test_cada_comando_invoca_maven_con_los_mismos_argumentos
 run_test test_cada_script_usa_el_wrapper_de_su_plataforma
+run_test test_ambos_escriben_el_mismo_documento_de_mutation
 
 finish_suite

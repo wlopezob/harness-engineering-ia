@@ -134,23 +134,7 @@ if "%EXIT_CODE%"=="0" (
     set "RESULT=FAILED"
 )
 
-if defined CI (
-    set "CI_VALUE=%CI%"
-) else (
-    set "CI_VALUE=false"
-)
-
-if defined GITHUB_RUN_ID (
-    set "GITHUB_RUN_ID_VALUE=%GITHUB_RUN_ID%"
-) else (
-    set "GITHUB_RUN_ID_VALUE=local"
-)
-
-if defined GITHUB_RUN_ATTEMPT (
-    set "GITHUB_RUN_ATTEMPT_VALUE=%GITHUB_RUN_ATTEMPT%"
-) else (
-    set "GITHUB_RUN_ATTEMPT_VALUE=local"
-)
+call :resolve_environment
 
 (
     echo {
@@ -201,6 +185,29 @@ echo  Evidence: !EVIDENCE_DIR!
 echo ==================================================
 
 exit /b %EXIT_CODE%
+
+rem Entorno de ejecucion registrado en la evidencia: lo comparten verify y
+rem mutation, asi que un cambio no puede quedarse en un solo comando.
+:resolve_environment
+if defined CI (
+    set "CI_VALUE=%CI%"
+) else (
+    set "CI_VALUE=false"
+)
+
+if defined GITHUB_RUN_ID (
+    set "GITHUB_RUN_ID_VALUE=%GITHUB_RUN_ID%"
+) else (
+    set "GITHUB_RUN_ID_VALUE=local"
+)
+
+if defined GITHUB_RUN_ATTEMPT (
+    set "GITHUB_RUN_ATTEMPT_VALUE=%GITHUB_RUN_ATTEMPT%"
+) else (
+    set "GITHUB_RUN_ATTEMPT_VALUE=local"
+)
+
+exit /b 0
 
 :copy_reports
 if not exist "%REPORTS_DIR%" mkdir "%REPORTS_DIR%"
@@ -295,44 +302,170 @@ echo ==================================================
 exit /b 0
 
 :mutation
+call :get_timestamp
+set "STARTED_AT=%TIMESTAMP_ISO%"
+set "RUN_TIMESTAMP=%TIMESTAMP_FILE%"
+set "START_EPOCH=%TIMESTAMP_EPOCH%"
+
+for /f "delims=" %%A in ('git -C "%ROOT_DIR%" rev-parse HEAD 2^>nul') do set "COMMIT_SHA=%%A"
+if not defined COMMIT_SHA set "COMMIT_SHA=unknown"
+
+for /f "delims=" %%A in ('git -C "%ROOT_DIR%" rev-parse --short HEAD 2^>nul') do set "SHORT_SHA=%%A"
+if not defined SHORT_SHA set "SHORT_SHA=unknown"
+
+for /f "delims=" %%A in ('git -C "%ROOT_DIR%" branch --show-current 2^>nul') do set "BRANCH=%%A"
+if not defined BRANCH (
+    if defined GITHUB_HEAD_REF (
+        set "BRANCH=%GITHUB_HEAD_REF%"
+    ) else (
+        set "BRANCH=detached"
+    )
+)
+
+rem la identidad se captura ANTES de Maven: lo que genere PIT no puede cambiar
+rem el estado que se declara analizado
+call :compute_source_state
+
+rem mismo nombre que en verify, mas el sufijo del comando: un directorio sin el
+rem bloque -dirty- describe un arbol limpio
+if "!SOURCE_DIRTY!"=="true" (
+    set "EVIDENCE_DIR=%ARTIFACTS_DIR%\%RUN_TIMESTAMP%-%SHORT_SHA%-dirty-!SOURCE_STATE:~0,7!-mutation"
+) else (
+    set "EVIDENCE_DIR=%ARTIFACTS_DIR%\%RUN_TIMESTAMP%-%SHORT_SHA%-mutation"
+)
+
+set "COMMAND_LOG=!EVIDENCE_DIR!\command.log"
+set "MUTATION_FILE=!EVIDENCE_DIR!\mutation.json"
+set "PIT_REPORTS_DIR=!EVIDENCE_DIR!\pit-reports"
+
+if not exist "!EVIDENCE_DIR!" mkdir "!EVIDENCE_DIR!"
+
+if defined SOURCE_MANIFEST_FILE (
+    copy /Y "!SOURCE_MANIFEST_FILE!" "!EVIDENCE_DIR!\source-state.txt" >nul
+)
+
 echo ==================================================
 echo  Engineering Harness: mutation testing
 echo ==================================================
 echo Repository: %ROOT_DIR%
 echo Backend:    %API_DIR%
+echo Evidence:   !EVIDENCE_DIR!
+echo Commit:     %SHORT_SHA% (!BRANCH!)
+
+if "!SOURCE_DIRTY!"=="true" (
+    echo Source:     DIRTY - !SOURCE_CHANGED_FILES! archivo^(s^) local^(es^) sin commit
+    echo State:      !SOURCE_STATE!  ^(manifiesto: source-state.txt^)
+) else (
+    echo Source:     working tree limpio
+    echo State:      !SOURCE_STATE!
+)
+
 echo.
 
+set "EXIT_CODE=0"
+
+rem un fallo previo a Maven tambien es una corrida: su motivo va al log y el
+rem documento se escribe igual, con exit code 2
 if not exist "%API_DIR%" (
-    echo ERROR: Backend directory not found: %API_DIR% 1>&2
-    exit /b 2
+    echo ERROR: Backend directory not found: %API_DIR% > "%COMMAND_LOG%"
+    type "%COMMAND_LOG%"
+    set "EXIT_CODE=2"
+    goto mutation_finalize
 )
 
 if not exist "%API_DIR%\mvnw.cmd" (
-    echo ERROR: Maven Wrapper not found: %API_DIR%\mvnw.cmd 1>&2
-    exit /b 2
+    echo ERROR: Maven Wrapper not found: %API_DIR%\mvnw.cmd > "%COMMAND_LOG%"
+    type "%COMMAND_LOG%"
+    set "EXIT_CODE=2"
+    goto mutation_finalize
 )
 
 pushd "%API_DIR%"
 
 rem mismo proceso logico que ./harness mutation: compilar tests y lanzar PIT
-call mvnw.cmd --batch-mode --no-transfer-progress test-compile org.pitest:pitest-maven:mutationCoverage
-set "MUTATION_EXIT_CODE=%ERRORLEVEL%"
+call mvnw.cmd --batch-mode --no-transfer-progress test-compile org.pitest:pitest-maven:mutationCoverage > "%COMMAND_LOG%" 2>&1
+set "EXIT_CODE=%ERRORLEVEL%"
 
 popd
 
-if not "%MUTATION_EXIT_CODE%"=="0" (
-    echo.
-    echo ==================================================
-    echo  MUTATION RESULT: FAILED
-    echo ==================================================
-    exit /b %MUTATION_EXIT_CODE%
+type "%COMMAND_LOG%"
+
+:mutation_finalize
+call :copy_pit_reports
+
+call :get_timestamp
+set "FINISHED_AT=%TIMESTAMP_ISO%"
+set /a "DURATION_SECONDS=%TIMESTAMP_EPOCH%-%START_EPOCH%"
+
+rem el fallo de PIT es justo la corrida que hay que poder auditar despues:
+rem misma evidencia, mismo documento, con el resultado real
+if "%EXIT_CODE%"=="0" (
+    set "RESULT=COMPLETED"
+) else (
+    set "RESULT=FAILED"
 )
+
+call :resolve_environment
+call :write_mutation_json
 
 echo.
 echo ==================================================
-echo  MUTATION RESULT: COMPLETED
+echo  MUTATION RESULT: !RESULT!
 echo  Report: %API_DIR%\target\pit-reports\index.html
+echo  Evidence: !EVIDENCE_DIR!
 echo ==================================================
+
+exit /b %EXIT_CODE%
+
+rem Los reportes de PIT viajan con la evidencia: en target\ los pisa la
+rem siguiente corrida. PIT los escribe tambien cuando no alcanza el threshold.
+:copy_pit_reports
+if exist "%API_DIR%\target\pit-reports" (
+    xcopy "%API_DIR%\target\pit-reports" ^
+          "%PIT_REPORTS_DIR%\" ^
+          /E /I /Y >nul
+)
+
+exit /b 0
+
+rem Documento de la corrida de mutation (github-34). Mismos campos y mismo
+rem orden que el heredoc de ./harness: lo compara tests/harness/parity_test.sh.
+:write_mutation_json
+(
+    echo {
+    echo   "schemaVersion": "1.0",
+    echo   "command": "harness.cmd mutation",
+    echo   "component": "orders-platform/apps/api",
+    echo   "result": "%RESULT%",
+    echo   "exitCode": %EXIT_CODE%,
+    echo   "startedAt": "%STARTED_AT%",
+    echo   "finishedAt": "%FINISHED_AT%",
+    echo   "durationSeconds": %DURATION_SECONDS%,
+    echo   "git": {
+    echo     "commit": "%COMMIT_SHA%",
+    echo     "branch": "!BRANCH!"
+    echo   },
+    echo   "source": {
+    echo     "dirty": !SOURCE_DIRTY!,
+    echo     "state": "!SOURCE_STATE!",
+    echo     "stateAlgorithm": "!SOURCE_STATE_ALGORITHM!",
+    echo     "scope": "!SOURCE_STATE_SCOPE!",
+    echo     "changedFiles": !SOURCE_CHANGED_FILES!,
+    echo     "manifest": "source-state.txt"
+    echo   },
+    echo   "environment": {
+    echo     "ci": "%CI_VALUE%",
+    echo     "githubRunId": "%GITHUB_RUN_ID_VALUE%",
+    echo     "githubRunAttempt": "%GITHUB_RUN_ATTEMPT_VALUE%"
+    echo   },
+    echo   "evidence": {
+    echo     "commandLog": "command.log",
+    echo     "pitReports": "pit-reports",
+    echo     "sourceManifest": "source-state.txt"
+    echo   }
+    echo }
+) > "%MUTATION_FILE%"
+
 exit /b 0
 
 :help

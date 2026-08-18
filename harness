@@ -233,57 +233,61 @@ write_verification_report() {
 EOF
 }
 
-verify_backend() {
-  local started_at
-  local finished_at
-  local started_epoch
-  local finished_epoch
-  local duration_seconds
-  local timestamp
-  local commit_sha
-  local short_sha
-  local branch
-  local evidence_dir
-  local exit_code
-  local result
+# Arranque común de una corrida con evidencia (verify y mutation): instante,
+# git, identidad del código y directorio ya creado con su manifiesto dentro.
+# El sufijo distingue qué comando la produjo.
+RUN_STARTED_AT=""
+RUN_STARTED_EPOCH=0
+RUN_COMMIT_SHA=""
+RUN_SHORT_SHA=""
+RUN_BRANCH=""
+RUN_EVIDENCE_DIR=""
 
-  started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-  started_epoch="$(date +%s)"
+start_run_evidence() {
+  local suffix="${1:-}"
+  local timestamp
+
+  RUN_STARTED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  RUN_STARTED_EPOCH="$(date +%s)"
   timestamp="$(date -u +"%Y%m%dT%H%M%SZ")"
 
-  commit_sha="$(git -C "${ROOT_DIR}" rev-parse HEAD 2>/dev/null || echo "unknown")"
-  short_sha="$(git -C "${ROOT_DIR}" rev-parse --short HEAD 2>/dev/null || echo "unknown")"
-  branch="$(git -C "${ROOT_DIR}" branch --show-current 2>/dev/null || echo "unknown")"
+  RUN_COMMIT_SHA="$(git -C "${ROOT_DIR}" rev-parse HEAD 2>/dev/null || echo "unknown")"
+  RUN_SHORT_SHA="$(git -C "${ROOT_DIR}" rev-parse --short HEAD 2>/dev/null || echo "unknown")"
+  RUN_BRANCH="$(git -C "${ROOT_DIR}" branch --show-current 2>/dev/null || echo "unknown")"
 
-  if [[ -z "${branch}" ]]; then
-    branch="${GITHUB_HEAD_REF:-detached}"
+  if [[ -z "${RUN_BRANCH}" ]]; then
+    RUN_BRANCH="${GITHUB_HEAD_REF:-detached}"
   fi
 
   # la identidad se captura ANTES de Maven: lo que genere el build no puede
-  # cambiar el estado que se declara verificado
+  # cambiar el estado que se declara verificado o analizado
   compute_source_state
 
   if [[ "${SOURCE_DIRTY}" == "true" ]]; then
-    evidence_dir="${ARTIFACTS_DIR}/${timestamp}-${short_sha}-dirty-${SOURCE_STATE:0:7}"
+    RUN_EVIDENCE_DIR="${ARTIFACTS_DIR}/${timestamp}-${RUN_SHORT_SHA}-dirty-${SOURCE_STATE:0:7}${suffix}"
   else
-    evidence_dir="${ARTIFACTS_DIR}/${timestamp}-${short_sha}"
+    RUN_EVIDENCE_DIR="${ARTIFACTS_DIR}/${timestamp}-${RUN_SHORT_SHA}${suffix}"
   fi
 
-  mkdir -p "${evidence_dir}"
+  mkdir -p "${RUN_EVIDENCE_DIR}"
 
   if [[ -n "${SOURCE_MANIFEST_FILE}" ]]; then
-    cp "${SOURCE_MANIFEST_FILE}" "${evidence_dir}/source-state.txt"
+    cp "${SOURCE_MANIFEST_FILE}" "${RUN_EVIDENCE_DIR}/source-state.txt"
     rm -rf "$(dirname "${SOURCE_MANIFEST_FILE}")"
     SOURCE_MANIFEST_FILE=""
   fi
+}
+
+print_run_header() {
+  local title="$1"
 
   echo "=================================================="
-  echo " Engineering Harness: backend verification"
+  echo " Engineering Harness: ${title}"
   echo "=================================================="
   echo "Repository: ${ROOT_DIR}"
   echo "Backend:    ${API_DIR}"
-  echo "Evidence:   ${evidence_dir}"
-  echo "Commit:     ${short_sha} (${branch})"
+  echo "Evidence:   ${RUN_EVIDENCE_DIR}"
+  echo "Commit:     ${RUN_SHORT_SHA} (${RUN_BRANCH})"
 
   if [[ "${SOURCE_DIRTY}" == "true" ]]; then
     echo "Source:     DIRTY - ${SOURCE_CHANGED_FILES} archivo(s) local(es) sin commit"
@@ -294,6 +298,19 @@ verify_backend() {
   fi
 
   echo
+}
+
+verify_backend() {
+  local finished_at
+  local duration_seconds
+  local evidence_dir
+  local exit_code
+  local result
+
+  start_run_evidence
+  evidence_dir="${RUN_EVIDENCE_DIR}"
+
+  print_run_header "backend verification"
 
   if [[ ! -d "${API_DIR}" ]]; then
     echo "ERROR: Backend directory not found: ${API_DIR}" \
@@ -325,8 +342,7 @@ verify_backend() {
   fi
 
   finished_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-  finished_epoch="$(date +%s)"
-  duration_seconds="$((finished_epoch - started_epoch))"
+  duration_seconds="$(($(date +%s) - RUN_STARTED_EPOCH))"
 
   if [[ "${exit_code}" -eq 0 ]]; then
     result="PASSED"
@@ -340,20 +356,20 @@ verify_backend() {
     "${evidence_dir}" \
     "${result}" \
     "${exit_code}" \
-    "${started_at}" \
+    "${RUN_STARTED_AT}" \
     "${finished_at}" \
     "${duration_seconds}" \
-    "${commit_sha}" \
-    "${branch}"
+    "${RUN_COMMIT_SHA}" \
+    "${RUN_BRANCH}"
 
   echo
   echo "=================================================="
   echo " HARNESS RESULT: ${result}"
 
   if [[ "${SOURCE_DIRTY}" == "true" ]]; then
-    echo " Source: DIRTY - HEAD ${short_sha} + cambios locales (state ${SOURCE_STATE:0:7})"
+    echo " Source: DIRTY - HEAD ${RUN_SHORT_SHA} + cambios locales (state ${SOURCE_STATE:0:7})"
   else
-    echo " Source: HEAD ${short_sha} (working tree limpio)"
+    echo " Source: HEAD ${RUN_SHORT_SHA} (working tree limpio)"
   fi
 
   echo " Evidence: ${evidence_dir}"
@@ -362,56 +378,143 @@ verify_backend() {
   return "${exit_code}"
 }
 
+# Los reportes de PIT viajan con la evidencia: en target/ los pisa la siguiente
+# corrida. PIT los escribe también cuando no alcanza el threshold.
+copy_pit_reports() {
+  local evidence_dir="$1"
+
+  if [[ -d "${API_DIR}/target/pit-reports" ]]; then
+    cp -R \
+      "${API_DIR}/target/pit-reports" \
+      "${evidence_dir}/pit-reports"
+  fi
+}
+
+# Documento de la corrida de mutation (github-34). Esquema propio: lo que
+# describe una corrida de PIT no evoluciona con lo que describe un verify.
+write_mutation_report() {
+  local evidence_dir="$1"
+  local result="$2"
+  local exit_code="$3"
+  local started_at="$4"
+  local finished_at="$5"
+  local duration_seconds="$6"
+  local commit_sha="$7"
+  local branch="$8"
+
+  cat > "${evidence_dir}/mutation.json" <<EOF
+{
+  "schemaVersion": "1.0",
+  "command": "./harness mutation",
+  "component": "orders-platform/apps/api",
+  "result": "${result}",
+  "exitCode": ${exit_code},
+  "startedAt": "${started_at}",
+  "finishedAt": "${finished_at}",
+  "durationSeconds": ${duration_seconds},
+  "git": {
+    "commit": "${commit_sha}",
+    "branch": "${branch}"
+  },
+  "source": {
+    "dirty": ${SOURCE_DIRTY},
+    "state": "${SOURCE_STATE}",
+    "stateAlgorithm": "${SOURCE_STATE_ALGORITHM}",
+    "scope": "${SOURCE_STATE_SCOPE}",
+    "changedFiles": ${SOURCE_CHANGED_FILES},
+    "manifest": "source-state.txt"
+  },
+  "environment": {
+    "ci": "${CI:-false}",
+    "githubRunId": "${GITHUB_RUN_ID:-local}",
+    "githubRunAttempt": "${GITHUB_RUN_ATTEMPT:-local}"
+  },
+  "evidence": {
+    "commandLog": "command.log",
+    "pitReports": "pit-reports",
+    "sourceManifest": "source-state.txt"
+  }
+}
+EOF
+}
+
 mutation_backend() {
+  local finished_at
+  local duration_seconds
+  local evidence_dir
   local exit_code
+  local result
 
-  echo "=================================================="
-  echo " Engineering Harness: mutation testing"
-  echo "=================================================="
-  echo "Repository: ${ROOT_DIR}"
-  echo "Backend:    ${API_DIR}"
-  echo
+  start_run_evidence "-mutation"
+  evidence_dir="${RUN_EVIDENCE_DIR}"
 
+  print_run_header "mutation testing"
+
+  # un fallo previo a Maven también es una corrida: su motivo va al log y el
+  # documento se escribe igual, con exit code 2
   if [[ ! -d "${API_DIR}" ]]; then
-    echo "ERROR: Backend directory not found: ${API_DIR}" >&2
-    exit 2
+    echo "ERROR: Backend directory not found: ${API_DIR}" \
+      | tee "${evidence_dir}/command.log"
+
+    exit_code=2
+  elif [[ ! -f "${API_DIR}/mvnw" ]]; then
+    echo "ERROR: Maven Wrapper not found: ${API_DIR}/mvnw" \
+      | tee "${evidence_dir}/command.log"
+
+    exit_code=2
+  else
+    chmod +x "${API_DIR}/mvnw"
+
+    # el exit code de Maven se propaga tal cual; el banner es el mismo que en
+    # harness.cmd (paridad de resultado principal, github-30)
+    set +e
+
+    (
+      cd "${API_DIR}"
+
+      ./mvnw \
+        --batch-mode \
+        --no-transfer-progress \
+        test-compile \
+        org.pitest:pitest-maven:mutationCoverage
+    ) 2>&1 | tee "${evidence_dir}/command.log"
+
+    exit_code="${PIPESTATUS[0]}"
+
+    set -e
   fi
 
-  if [[ ! -f "${API_DIR}/mvnw" ]]; then
-    echo "ERROR: Maven Wrapper not found: ${API_DIR}/mvnw" >&2
-    exit 2
+  finished_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  duration_seconds="$(($(date +%s) - RUN_STARTED_EPOCH))"
+
+  # el fallo de PIT es justo la corrida que hay que poder auditar después:
+  # misma evidencia, mismo documento, con el resultado real
+  if [[ "${exit_code}" -eq 0 ]]; then
+    result="COMPLETED"
+  else
+    result="FAILED"
   fi
 
-  chmod +x "${API_DIR}/mvnw"
+  copy_pit_reports "${evidence_dir}"
 
-  # el exit code de Maven se propaga tal cual; el banner es el mismo que en
-  # harness.cmd (paridad de resultado principal, github-30)
-  set +e
-  (
-    cd "${API_DIR}"
-
-    ./mvnw \
-      --batch-mode \
-      --no-transfer-progress \
-      test-compile \
-      org.pitest:pitest-maven:mutationCoverage
-  )
-  exit_code=$?
-  set -e
-
-  if [[ "${exit_code}" -ne 0 ]]; then
-    echo
-    echo "=================================================="
-    echo " MUTATION RESULT: FAILED"
-    echo "=================================================="
-    exit "${exit_code}"
-  fi
+  write_mutation_report \
+    "${evidence_dir}" \
+    "${result}" \
+    "${exit_code}" \
+    "${RUN_STARTED_AT}" \
+    "${finished_at}" \
+    "${duration_seconds}" \
+    "${RUN_COMMIT_SHA}" \
+    "${RUN_BRANCH}"
 
   echo
   echo "=================================================="
-  echo " MUTATION RESULT: COMPLETED"
+  echo " MUTATION RESULT: ${result}"
   echo " Report: ${API_DIR}/target/pit-reports/index.html"
+  echo " Evidence: ${evidence_dir}"
   echo "=================================================="
+
+  return "${exit_code}"
 }
 
 format_backend() {
