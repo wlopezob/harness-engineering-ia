@@ -314,7 +314,9 @@ test sale con 1 y `pipefail` + `set -e` mataban la suite. Arreglado con
 
 ### Verificación en GitHub (PR #31)
 
-Run `32083553470`: **7 jobs en success** — `Source state self-test` (las tres
+Run final `32085180799` (tras el punto 4 de "Lo que encontró el CI"): **7 jobs
+en success**, `Command contract (cmd)` 14/14 con el log de `harness.cmd`
+limpio de errores internos. Run previo `32083553470`: **7 jobs en success** — `Source state self-test` (las tres
 suites locales), `Source state (bash)`, `Source state (cmd)`, `bash and cmd
 agree on the state`, `Command contract (bash)` (14/14), `Command contract
 (cmd)` (**14/14 en `windows-latest`**) y el gate `Harness self-test`. Salida
@@ -357,6 +359,49 @@ y `state` solo se había ejecutado desde `pwsh`.
    propaga. Ahora salta con `goto` a una etiqueta de nivel superior, el
    patrón que ya usan `help` y el comando desconocido.
 
+4. **Falso verde: `verify` imprimía `Unbalanced parenthesis.` dos veces y la
+   suite lo daba por bueno.** Detectado en review del PR (run `32083553470`,
+   todo en verde): la suite solo miraba banners y exit codes. Se endureció
+   **primero** — `run_harness` falla ante cualquier error interno del
+   intérprete (`Unbalanced parenthesis.`, `was unexpected at this time.`,
+   `is not recognized…`, `The syntax of the command is incorrect.`,
+   `Missing operand/operator.`, `Invalid number.`… y los equivalentes de
+   bash), y los dos casos de `verify` exigen que `verification.json` sea
+   **JSON parseable** (`jq`, `python3` de reserva) con `durationSeconds`
+   numérico y `exitCode` igual al código de salida real, con Maven pasando y
+   fallando. **RED observado en `windows-latest`** (run `32084221053`):
+   `11 passed, 3 failed` — *"harness.cmd verify emitió un error interno del
+   intérprete: 'Unbalanced parenthesis.'"* en los tres casos de `verify`
+   (Maven pasa, Maven falla, sin wrapper). Contra bash los cuatro mutantes de
+   las aserciones nuevas (error interno fingido, JSON roto, `durationSeconds`
+   como string, `exitCode` siempre 0) mueren.
+
+   **Causa real, reproducida aislada** (paso de diagnóstico temporal en el
+   job de Windows, ya retirado): `%TIME%` del runner era `[ 0:22:11.13]` —
+   **con espacio inicial cuando la hora tiene un dígito** — así que el primer
+   token de `:calculate_duration` era `" 0"` y `set /a` recibía `(1 0-100)`
+   → `Unbalanced parenthesis.` (dos veces: inicio y fin). La misma aritmética
+   con `"23:57:28.55"` da 86248 y con `"00:12:13,55"` da 733: funcionaba de
+   10:00 a 23:59 y fallaba de 00:00 a 09:59. Y como los operandos quedaban
+   indefinidos, `durationSeconds` salía **0 y el JSON seguía siendo válido**:
+   dos capas de falso verde. No era, por tanto, la cita de la corrección
+   anterior (los paréntesis del bloque, ya arreglada); era el formato de la
+   variable.
+
+   **Arreglo:** desaparecen `:calculate_duration` y todo uso de `%TIME%`. Una
+   sola llamada a PowerShell en `:get_timestamp` devuelve el instante UTC en
+   ISO, compacto y **epoch en segundos**; `verify` guarda el epoch inicial y
+   `durationSeconds` es la diferencia — lo mismo que `date +%s` en bash, sin
+   depender de la hora ni del formato del locale. Para que un `durationSeconds`
+   "número válido pero que no mide nada" no vuelva a colarse, el stub de Maven
+   duerme 2 s en el caso de éxito y la suite exige `durationSeconds >= 2` en
+   las dos plataformas (el mutante "siempre 0" muere en bash).
+
+   **Confirmación:** run `32085180799`, a las 00:37 UTC (hora de un dígito,
+   la franja que fallaba): `Command contract (cmd)` 14/14, **0 apariciones**
+   de errores internos en todo el log del job, la salida de `harness.cmd
+   verify` limpia entre el encabezado y `HARNESS RESULT: PASSED`.
+
 Y un defecto de la propia suite que Windows destapó: `evidence_dir_of`
 (`find … | head -1` en una asignación) mataba el runner bajo `pipefail`
 cuando `artifacts/harness` no existía — que es justo lo que pasa cuando
@@ -373,10 +418,12 @@ aserción no bastaban para diagnosticar desde macOS.
 2. La suite de contrato tiene **14 casos** en vez de los 8 enumerados (6–13):
    se separaron por comando los casos "sin wrapper" (`mutation`, `format`,
    `verify`) y los de fallo de Maven, para que un rojo nombre el comando.
-3. **Tres arreglos en `harness.cmd` que el plan no preveía** (`find.exe`
-   absoluto, `set /a` entrecomillado, `exit /b` fuera del `if` anidado) y dos
-   en la suite (`timeout` en `run_harness`, `evidence_dir_of` compartido y
-   tolerante). Todos salieron del job de Windows; ver "Lo que encontró el
+3. **Cuatro arreglos en `harness.cmd` que el plan no preveía** (`find.exe`
+   absoluto, `set /a` entrecomillado, `exit /b` fuera del `if` anidado, y la
+   duración por epoch en vez de parsear `%TIME%`) y tres en la suite
+   (`timeout` en `run_harness`, `evidence_dir_of` compartido y tolerante, y
+   la guardia de errores internos + JSON real + `durationSeconds` medido, que
+   convirtió un falso verde en un RED). Todos salieron del job de Windows; ver "Lo que encontró el
    CI". El inventario de divergencias del plan era de **contrato**; estos son
    defectos de **ejecución** que solo aparecen al ejecutar de verdad — que es
    la tesis del issue.

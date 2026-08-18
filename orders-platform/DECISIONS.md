@@ -429,7 +429,16 @@ defectos de `harness.cmd` que ninguna inspección de texto habría visto —
 `%SystemRoot%\System32\find.exe`), un `set /a` con paréntesis dentro de un
 bloque abortaba `verify` con 255 (ahora entre comillas) y un `exit /b 2` en un
 `if` anidado llegaba como 0 a `cmd /c` (ahora `goto` a una etiqueta de nivel
-superior). Regla que queda: **en `harness.cmd`, ejecutables externos con
-homónimo GNU van con ruta absoluta, la aritmética de `set /a` va entre
-comillas, y los `exit /b` con código van en nivel superior.** Ver
-`specs/github-30/plan.md`.
+superior). Y un cuarto que la suite **no vio hasta endurecerla**: `verify`
+imprimía `Unbalanced parenthesis.` y dejaba `durationSeconds` en 0 de 00:00
+a 09:59 porque `%TIME%` lleva un espacio inicial con horas de un dígito; el
+job estaba en verde porque solo se miraban banners y exit codes. Ahora la
+duración sale de un epoch UTC (una sola llamada a PowerShell, como `date +%s`
+en bash) y **la suite de contrato falla ante cualquier error interno del
+intérprete, exige que `verification.json` sea JSON real con `durationSeconds`
+numérico que mida de verdad (Maven de mentira duerme 2 s) y `exitCode` igual
+al código de salida**, con Maven pasando y fallando. Reglas que quedan: **en
+`harness.cmd`, ejecutables externos con homónimo GNU van con ruta absoluta,
+la aritmética de `set /a` va entre comillas, los `exit /b` con código van en
+nivel superior, y nada se parsea de `%TIME%`; en la suite, una corrida con
+errores internos del intérprete nunca es verde.** Ver `specs/github-30/plan.md`.
