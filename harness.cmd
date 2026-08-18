@@ -380,6 +380,11 @@ if not exist "%API_DIR%\mvnw.cmd" (
     goto mutation_finalize
 )
 
+rem mutation no ejecuta `clean`, asi que el reporte que quede en target\ es de
+rem una corrida anterior. Si esta falla antes de que PIT escriba (p. ej. en
+rem test-compile), adjuntarlo diria que se analizo un codigo que no se analizo.
+if exist "%API_DIR%\target\pit-reports" rmdir /S /Q "%API_DIR%\target\pit-reports"
+
 pushd "%API_DIR%"
 
 rem mismo proceso logico que ./harness mutation: compilar tests y lanzar PIT
@@ -419,11 +424,19 @@ exit /b %EXIT_CODE%
 
 rem Los reportes de PIT viajan con la evidencia: en target\ los pisa la
 rem siguiente corrida. PIT los escribe tambien cuando no alcanza el threshold.
+rem
+rem Deja en PIT_REPORTS_JSON la referencia que va en el documento, o null si
+rem esta corrida no produjo reporte: prometer un directorio que no existe es
+rem afirmar una evidencia que nadie produjo. Que lo que haya en target\ sea de
+rem ESTA corrida lo garantiza el rmdir previo a Maven.
 :copy_pit_reports
+set "PIT_REPORTS_JSON=null"
+
 if exist "%API_DIR%\target\pit-reports" (
     xcopy "%API_DIR%\target\pit-reports" ^
           "%PIT_REPORTS_DIR%\" ^
           /E /I /Y >nul
+    set PIT_REPORTS_JSON="pit-reports"
 )
 
 exit /b 0
@@ -460,7 +473,7 @@ rem orden que el heredoc de ./harness: lo compara tests/harness/parity_test.sh.
     echo   },
     echo   "evidence": {
     echo     "commandLog": "command.log",
-    echo     "pitReports": "pit-reports",
+    echo     "pitReports": !PIT_REPORTS_JSON!,
     echo     "sourceManifest": "source-state.txt"
     echo   }
     echo }

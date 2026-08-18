@@ -552,6 +552,21 @@ implementación y no en la otra falla en local, sin esperar a Windows. Como los
 self-tests del harness no tienen mutation testing, los casos nuevos se
 comprobaron con una batería de mutantes a mano sobre los dos scripts.
 
+**El reporte adjunto es el de esta corrida, no el que quedó en `target/`:**
+`mutation` no ejecuta `clean`, así que copiar `target/pit-reports` "si existe"
+adjuntaba el reporte de la corrida anterior cuando esta fallaba antes de que
+PIT escribiera (p. ej. en `test-compile`) — evidencia con el `source.state` del
+código B junto al reporte del código A, el mismo pecado que este trabajo vino a
+corregir. Ahora el directorio se **descarta antes de lanzar Maven**: lo que
+quede después es de esta corrida por construcción, sin heurísticas (descartadas
+comparar marcas de tiempo, que no prueban autoría, y deducirlo del texto que
+imprime PIT). Y `evidence.pitReports` vale `null` cuando no hubo reporte:
+prometer un directorio que no existe es afirmar una evidencia que nadie
+produjo. Nada de PIT cambia; `verify` no tenía el problema porque ejecuta
+`clean`. Lo destapó la revisión del PR, no el CI: el caso solo aparece cuando
+la corrida falla **antes** de PIT, que es justo el camino que la suite no
+recorría.
+
 **Lo que demostró ejecutar de verdad, otra vez:** el primer push dejó rojos los
 dos jobs de contrato con el mismo fallo, y no era del harness sino de la suite:
 un helper nuevo capturaba el stdout de `run_harness`, que con

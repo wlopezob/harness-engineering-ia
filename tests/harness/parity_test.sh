@@ -100,6 +100,11 @@ json_keys() {
   sed -n 's/^[[:space:]]*"\([A-Za-z]\{1,\}\)":.*/\1/p' | as_line
 }
 
+# valor tal cual (sin desenvolver comillas) de una clave del documento
+json_value_of() {
+  sed -n "s/^[[:space:]]*\"$1\": *\(.*\)$/\1/p" | head -1 | sed 's/,$//'
+}
+
 # valor de una clave escalar del documento
 json_literal() {
   sed -n "s/^[[:space:]]*\"$1\": *\"\([^\"]*\)\".*/\1/p" | head -1
@@ -258,6 +263,33 @@ test_ambos_escriben_el_mismo_documento_de_mutation() {
     "el comando registrado debe ser el mismo módulo el nombre del programa"
 }
 
+test_ninguno_afirma_el_reporte_de_pit_sin_calcularlo() {
+  local bash_value cmd_value
+  bash_value="$(bash_mutation_json | json_value_of pitReports)"
+  cmd_value="$(cmd_mutation_json | json_value_of pitReports)"
+
+  assert_not_empty "${bash_value}" "./harness debe registrar la referencia al reporte"
+  assert_not_empty "${cmd_value}" "harness.cmd debe registrar la referencia al reporte"
+
+  # escrita a mano, la referencia afirma un reporte aunque la corrida no lo
+  # haya producido: tiene que salir de una variable que la corrida calcula
+  if [[ "${bash_value}" == '"pit-reports"' ]]; then
+    fail "./harness no puede afirmar el reporte de PIT sin comprobar que existe"
+  fi
+  if [[ "${cmd_value}" == '"pit-reports"' ]]; then
+    fail "harness.cmd no puede afirmar el reporte de PIT sin comprobar que existe"
+  fi
+
+  # y los dos tienen que descartar el reporte de la corrida anterior: sin eso,
+  # una corrida que falla antes de PIT adjuntaría el reporte de otro código
+  if ! grep -q 'rm -rf "\${API_DIR}/target/pit-reports"' "${BASH_SCRIPT}"; then
+    fail "./harness debe descartar el reporte previo antes de lanzar Maven"
+  fi
+  if ! grep -q 'rmdir /S /Q "%API_DIR%\\target\\pit-reports"' "${CMD_SCRIPT}"; then
+    fail "harness.cmd debe descartar el reporte previo antes de lanzar Maven"
+  fi
+}
+
 echo "=================================================="
 echo " Harness self-test: bash/cmd static parity"
 echo "=================================================="
@@ -268,5 +300,6 @@ run_test test_el_texto_del_help_es_el_mismo_modulo_el_nombre_del_programa
 run_test test_cada_comando_invoca_maven_con_los_mismos_argumentos
 run_test test_cada_script_usa_el_wrapper_de_su_plataforma
 run_test test_ambos_escriben_el_mismo_documento_de_mutation
+run_test test_ninguno_afirma_el_reporte_de_pit_sin_calcularlo
 
 finish_suite

@@ -380,14 +380,30 @@ verify_backend() {
 
 # Los reportes de PIT viajan con la evidencia: en target/ los pisa la siguiente
 # corrida. PIT los escribe también cuando no alcanza el threshold.
+#
+# Imprime la referencia que va en el documento ("pit-reports") solo si hay algo
+# que copiar; vacío si esta corrida no dejó reporte. Que lo que haya en target/
+# sea de ESTA corrida lo garantiza discard_stale_pit_reports.
 copy_pit_reports() {
   local evidence_dir="$1"
 
-  if [[ -d "${API_DIR}/target/pit-reports" ]]; then
-    cp -R \
-      "${API_DIR}/target/pit-reports" \
-      "${evidence_dir}/pit-reports"
+  if [[ ! -d "${API_DIR}/target/pit-reports" ]]; then
+    return 0
   fi
+
+  cp -R \
+    "${API_DIR}/target/pit-reports" \
+    "${evidence_dir}/pit-reports"
+
+  printf 'pit-reports'
+}
+
+# mutation no ejecuta `clean`, así que el reporte que quede en target/ es de una
+# corrida anterior. Si esta falla antes de que PIT escriba (p. ej. en
+# test-compile), adjuntarlo diría que se analizó un código que no se analizó:
+# la evidencia declararía el state de este árbol junto al reporte de otro.
+discard_stale_pit_reports() {
+  rm -rf "${API_DIR}/target/pit-reports"
 }
 
 # Documento de la corrida de mutation (github-34). Esquema propio: lo que
@@ -401,6 +417,16 @@ write_mutation_report() {
   local duration_seconds="$6"
   local commit_sha="$7"
   local branch="$8"
+  local pit_reports="$9"
+  local pit_reports_json
+
+  # null, no una ruta: prometer un directorio que no existe es afirmar una
+  # evidencia que nadie produjo
+  if [[ -n "${pit_reports}" ]]; then
+    pit_reports_json="\"${pit_reports}\""
+  else
+    pit_reports_json="null"
+  fi
 
   cat > "${evidence_dir}/mutation.json" <<EOF
 {
@@ -431,7 +457,7 @@ write_mutation_report() {
   },
   "evidence": {
     "commandLog": "command.log",
-    "pitReports": "pit-reports",
+    "pitReports": ${pit_reports_json},
     "sourceManifest": "source-state.txt"
   }
 }
@@ -444,6 +470,7 @@ mutation_backend() {
   local evidence_dir
   local exit_code
   local result
+  local pit_reports
 
   start_run_evidence "-mutation"
   evidence_dir="${RUN_EVIDENCE_DIR}"
@@ -464,6 +491,8 @@ mutation_backend() {
     exit_code=2
   else
     chmod +x "${API_DIR}/mvnw"
+
+    discard_stale_pit_reports
 
     # el exit code de Maven se propaga tal cual; el banner es el mismo que en
     # harness.cmd (paridad de resultado principal, github-30)
@@ -495,7 +524,7 @@ mutation_backend() {
     result="FAILED"
   fi
 
-  copy_pit_reports "${evidence_dir}"
+  pit_reports="$(copy_pit_reports "${evidence_dir}")"
 
   write_mutation_report \
     "${evidence_dir}" \
@@ -505,7 +534,8 @@ mutation_backend() {
     "${finished_at}" \
     "${duration_seconds}" \
     "${RUN_COMMIT_SHA}" \
-    "${RUN_BRANCH}"
+    "${RUN_BRANCH}" \
+    "${pit_reports}"
 
   echo
   echo "=================================================="

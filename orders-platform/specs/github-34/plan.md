@@ -87,6 +87,26 @@ Backend ausente o Maven Wrapper ausente → `exitCode 2`, `result FAILED`, el
 error en `command.log` y el JSON escrito, igual que hace `verify`. Una corrida
 que falló nunca queda sin rastro.
 
+### 5. Solo se adjunta el reporte que produjo esta corrida
+
+`target/pit-reports` se borra **antes** de lanzar Maven; después, lo que haya
+es de esta corrida por construcción, sin heurísticas. Descartadas: comparar la
+marca de tiempo del directorio antes y después (que algo se modifique no prueba
+que lo produjera esta corrida, y comparar fechas en batch depende del locale) y
+deducir del log si PIT llegó a ejecutarse (acopla el harness al texto que
+imprime PIT). Coste aceptado: un reporte anterior que siguiera en `target/`
+desaparece; si lo produjo el harness, su copia vive en la evidencia de aquella
+corrida.
+
+### 6. `evidence.pitReports` es `null` cuando no hubo reporte
+
+Prometer un directorio que no existe es afirmar una evidencia que nadie
+produjo. El campo se mantiene siempre presente (esquema estable, y es lo que
+compara la paridad estática entre las dos implementaciones) con valor
+`"pit-reports"` o `null`. Descartadas: omitir la clave (el conjunto de claves
+dejaría de ser fijo) y la cadena vacía (una ruta vacía parece un bug, no una
+afirmación deliberada).
+
 ## Contrato del documento
 
 `mutation.json` (bash; en cmd cambia solo `command`, como ya ocurre con
@@ -119,6 +139,9 @@ que falló nunca queda sin rastro.
   }
 }
 ```
+
+`pitReports` vale `null` cuando la corrida no produjo reporte (falló antes de
+que PIT escribiera); nunca apunta al reporte de una corrida anterior.
 
 Cubre los mínimos del issue: schema, comando, componente, resultado, exit code,
 inicio, fin, duración, git, identidad del source y referencias a la evidencia.
@@ -222,6 +245,7 @@ que obliga a implementar el lado cmd sin esperar a CI.
 | 6 | contract | sin Maven Wrapper → exit 2, `result FAILED`, `exitCode 2` y el error en `command.log` | hoy sale por stderr sin evidencia |
 | 7 | contract | `verify` y `mutation` en el mismo repo dejan **dos** directorios distinguibles, cada uno con su JSON; con árbol sucio el de mutation es `…-dirty-<state7>-mutation` y `source.dirty` es `true` | se pisarían / no habría sufijo |
 | 8 | parity | los dos scripts escriben el mismo documento: mismas claves, mismo `schemaVersion`, mismas referencias de `evidence` | `harness.cmd` no escribe ninguno |
+| 9 | contract | con un reporte de una corrida anterior en `target/` y una corrida que falla antes de que PIT escriba, la evidencia no contiene ese reporte ni lo promete en el documento (añadido en la revisión del PR) | se copiaba el reporte viejo y `pitReports` decía `"pit-reports"` |
 
 Triangulación prevista: el caso 4 elimina la implementación que solo funciona
 en el camino feliz; el 5, la que calcula el estado al final; el 7, la que
@@ -250,9 +274,16 @@ directorio de evidencia, y en CI el job `Command contract (cmd)` de
 
 ## Assumptions
 
-* `mutation` sigue **sin** `clean`: la copia de `pit-reports` refleja lo que
-  hay tras la corrida y PIT reescribe el reporte en su sitio
-  (`timestampedReports=false`).
+* `mutation` sigue **sin** `clean` (no se toca nada de PIT), pero el harness
+  **descarta `target/pit-reports` antes de lanzar Maven**. La versión inicial
+  de este plan asumía que copiar el directorio después de la corrida bastaba;
+  **es falso**: si la corrida falla antes de que PIT escriba —por ejemplo en
+  `test-compile`—, ahí sigue el reporte de la corrida anterior, y la evidencia
+  quedaría con `source.state` del código B junto al `pit-reports/` del código
+  A. Descartándolo antes, lo que quede después es de esta corrida por
+  construcción.
+* `verify` no corre ese riesgo: ejecuta `clean`, así que `target/` empieza
+  vacío en cada corrida.
 * Se copia `target/pit-reports` completo (HTML + XML). Está en `.gitignore`
   vía `artifacts/`, así que solo ocupa disco local.
 * Nada de PIT cambia: goals, thresholds, paquetes analizados y operadores son
@@ -358,6 +389,31 @@ La evidencia de mutation contiene `command.log` (169 líneas, la salida completa
 declarado:   2753cde7d80e619d58563b47b0c8c2339a0a0906
 recomputado: 2753cde7d80e619d58563b47b0c8c2339a0a0906   (git hash-object --stdin < source-state.txt)
 ```
+
+### Segunda vuelta: el hueco de auditabilidad (revisión del PR)
+
+La revisión encontró que `mutation` copiaba `target/pit-reports` siempre que
+existiera, sin garantizar que fuera de esta corrida. Rojo antes de tocar
+producción, con reporte viejo marcado y una corrida que falla sin generar nada
+(nuevo `HARNESS_TEST_MVNW_NO_REPORT` en los dos wrappers de mentira):
+
+```
+- test_mutation_no_adjunta_el_reporte_de_una_corrida_anterior
+  FAIL: la evidencia no puede adjuntar el reporte de una corrida anterior
+  FAIL: mutation.json no puede prometer reportes que esta corrida no produjo
+```
+
+Green: `discard_stale_pit_reports` antes de Maven en bash y `rmdir /S /Q` en
+cmd; `copy_pit_reports` devuelve la referencia solo si copió algo, y el
+documento escribe `null` cuando no la hay.
+
+La paridad estática **seguía verde** con `harness.cmd` afirmando el reporte a
+pelo, así que se le añadió el diente que faltaba: la referencia tiene que salir
+de una variable calculada en las dos implementaciones, y las dos tienen que
+descartar el reporte previo. Batería de esta vuelta: 5/5 mutantes muertos
+(bash sin descarte, bash afirmando siempre, bash copiando lo que no es de la
+corrida, cmd sin descarte, cmd afirmando siempre) — los dos de cmd mueren en
+local, sin esperar a Windows.
 
 ### Lo que encontró el CI (y no se veía en local)
 

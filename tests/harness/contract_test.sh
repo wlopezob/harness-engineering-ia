@@ -40,7 +40,9 @@ esac
 
 # Repo git temporal con los dos scripts y los dos wrappers de mentira. Los
 # wrappers escriben "$*" en mvnw-args.txt, fabrican un pit-reports mínimo (como
-# haría PIT), crean HARNESS_TEST_MVNW_TOUCH dentro del backend si se pide (un
+# haría PIT, salvo con HARNESS_TEST_MVNW_NO_REPORT: entonces fallan sin generar
+# nada, como un test-compile que no compila), crean HARNESS_TEST_MVNW_TOUCH
+# dentro del backend si se pide (un
 # archivo NO ignorado, para comprobar qué código declara la evidencia), duermen
 # HARNESS_TEST_MVNW_SLEEP segundos si se pide (para que durationSeconds tenga
 # algo que medir) y salen con HARNESS_TEST_MVNW_EXIT.
@@ -61,8 +63,10 @@ new_repo() {
 here="$(cd "$(dirname "$0")" && pwd)"
 printf '%s\n' "$*" > "${here}/mvnw-args.txt"
 printf 'maven-stub: %s\n' "$*"
-mkdir -p "${here}/target/pit-reports"
-printf '<html/>\n' > "${here}/target/pit-reports/index.html"
+if [[ -z "${HARNESS_TEST_MVNW_NO_REPORT:-}" ]]; then
+  mkdir -p "${here}/target/pit-reports"
+  printf '<html/>\n' > "${here}/target/pit-reports/index.html"
+fi
 [[ -n "${HARNESS_TEST_MVNW_TOUCH:-}" ]] \
   && printf 'generado durante la corrida\n' > "${here}/${HARNESS_TEST_MVNW_TOUCH}"
 [[ -n "${HARNESS_TEST_MVNW_SLEEP:-}" ]] && sleep "${HARNESS_TEST_MVNW_SLEEP}"
@@ -75,8 +79,10 @@ STUB
     '@echo off' \
     'echo %* > "%~dp0mvnw-args.txt"' \
     'echo maven-stub: %*' \
+    'if defined HARNESS_TEST_MVNW_NO_REPORT goto :sin_reporte' \
     'if not exist "%~dp0target\pit-reports" mkdir "%~dp0target\pit-reports"' \
     'echo ^<html/^> > "%~dp0target\pit-reports\index.html"' \
+    ':sin_reporte' \
     'if defined HARNESS_TEST_MVNW_TOUCH echo generado durante la corrida > "%~dp0%HARNESS_TEST_MVNW_TOUCH%"' \
     'if defined HARNESS_TEST_MVNW_SLEEP powershell -NoProfile -Command "Start-Sleep -Seconds %HARNESS_TEST_MVNW_SLEEP%"' \
     'if not defined HARNESS_TEST_MVNW_EXIT set "HARNESS_TEST_MVNW_EXIT=0"' \
@@ -415,6 +421,38 @@ test_mutation_deja_evidencia_cuando_pit_falla() {
   fi
 }
 
+test_mutation_no_adjunta_el_reporte_de_una_corrida_anterior() {
+  local dir evidence json referencia
+  dir="$(new_repo)"
+
+  # una corrida anterior dejó su reporte en target/: mutation no hace `clean`,
+  # así que sigue ahí cuando empieza la siguiente
+  mkdir -p "${dir}/${API_REL}/target/pit-reports"
+  printf '<html>REPORTE-VIEJO</html>\n' > "${dir}/${API_REL}/target/pit-reports/index.html"
+
+  # esta corrida falla antes de que PIT genere nada (p.ej. en test-compile)
+  HARNESS_TEST_MVNW_NO_REPORT=1 HARNESS_TEST_MVNW_EXIT=1 run_harness "${dir}" mutation
+  assert_equals "1" "${HARNESS_RC}" "mutation debe propagar el fallo"
+
+  evidence="$(evidence_dir_of "${dir}" mutation)"
+  assert_not_empty "${evidence}" "mutation debe dejar evidencia también cuando falla"
+
+  if [[ -n "${evidence}" ]]; then
+    # la evidencia declara el código de ESTA corrida: adjuntarle el reporte de
+    # la anterior sería decir que se analizó un código que no se analizó
+    if [[ -d "${evidence}/pit-reports" ]] \
+      && grep -rq "REPORTE-VIEJO" "${evidence}/pit-reports" 2>/dev/null; then
+      fail "la evidencia no puede adjuntar el reporte de una corrida anterior"
+    fi
+
+    json="${evidence}/mutation.json"
+    referencia="$(json_query "${json}" ".evidence.pitReports" || true)"
+    if [[ "${referencia}" == "pit-reports" ]]; then
+      fail "mutation.json no puede prometer reportes que esta corrida no produjo"
+    fi
+  fi
+}
+
 test_la_evidencia_de_mutation_describe_el_codigo_de_antes_de_correr_pit() {
   local dir before after evidence json declared recomputed
   dir="$(new_repo)"
@@ -655,6 +693,7 @@ run_test test_mutation_registra_el_resultado_y_lo_que_tardo
 run_test test_mutation_conserva_el_log_y_los_reportes_de_pit
 run_test test_mutation_falla_con_el_exit_code_de_maven
 run_test test_mutation_deja_evidencia_cuando_pit_falla
+run_test test_mutation_no_adjunta_el_reporte_de_una_corrida_anterior
 run_test test_la_evidencia_de_mutation_describe_el_codigo_de_antes_de_correr_pit
 run_test test_mutation_sin_wrapper_falla_con_2_y_deja_evidencia
 run_test test_verify_y_mutation_no_se_pisan_la_evidencia
