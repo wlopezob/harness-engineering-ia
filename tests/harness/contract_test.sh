@@ -98,12 +98,89 @@ run_harness() {
   esac
   HARNESS_OUT="${HARNESS_OUT//$'\r'/}"
 
+  # ninguna corrida puede emitir errores internos del intérprete: un banner en
+  # verde con "Unbalanced parenthesis." en medio es un falso verde
+  assert_no_interpreter_errors "${HARNESS_OUT}" "${PROGRAM} $*"
+
   # HARNESS_TEST_VERBOSE=1 vuelca cada corrida: en CI es la única forma de ver
   # qué imprimió harness.cmd cuando una aserción falla en la otra plataforma
   if [[ "${HARNESS_TEST_VERBOSE:-0}" == "1" ]]; then
     printf '    $ %s %s  (rc=%s)\n' "${PROGRAM}" "$*" "${HARNESS_RC}"
     printf '%s\n' "${HARNESS_OUT}" | sed 's/^/    | /'
   fi
+}
+
+# Mensajes que solo emite el propio intérprete (cmd.exe o bash) cuando el
+# script está roto. Ninguno es salida legítima del harness.
+INTERPRETER_ERROR_PATTERNS=(
+  "Unbalanced parenthesis."
+  "was unexpected at this time."
+  "is not recognized as an internal or external command"
+  "The syntax of the command is incorrect."
+  "Missing operand."
+  "Missing operator."
+  "Invalid number."
+  "Divide by zero error."
+  "The system cannot find the batch label"
+  "The system cannot find the path specified."
+  "The system cannot find the file specified."
+  ": command not found"
+  ": syntax error"
+  ": unbound variable"
+  ": No such file or directory"
+)
+
+assert_no_interpreter_errors() {
+  local output="$1" what="$2" pattern
+  for pattern in "${INTERPRETER_ERROR_PATTERNS[@]}"; do
+    if [[ "${output}" == *"${pattern}"* ]]; then
+      fail "${what} emitió un error interno del intérprete: '${pattern}'"
+    fi
+  done
+}
+
+# JSON real: jq en los runners y en la máquina de desarrollo; python3 de reserva
+json_query() {
+  local file="$1" query="$2"
+  if command -v jq >/dev/null 2>&1; then
+    tr -d '\r' < "${file}" | jq -e -r "${query}" 2>/dev/null
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 - "${file}" "${query}" <<'PY' 2>/dev/null
+import json, sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+key = sys.argv[2]
+if key == ".":
+    print("ok")
+else:
+    value = data[key.lstrip(".")]
+    print("number" if isinstance(value, (int, float)) and not isinstance(value, bool) else "other"
+          if key.endswith("|type") else value)
+PY
+  else
+    return 3
+  fi
+}
+
+# verification.json de la evidencia $1 debe ser JSON parseable con exitCode y
+# durationSeconds numéricos (y exitCode igual al código de salida $2)
+assert_verification_json() {
+  local evidence="$1" expected_rc="$2" file="$1/verification.json" parsed
+  if [[ ! -f "${file}" ]]; then
+    fail "la evidencia debe incluir verification.json"
+    return 0
+  fi
+  if ! json_query "${file}" "." >/dev/null; then
+    fail "verification.json debe ser JSON parseable"
+    return 0
+  fi
+  parsed="$(json_query "${file}" ".durationSeconds | type" || true)"
+  assert_equals "number" "${parsed}" "verification.json debe tener durationSeconds numérico"
+  parsed="$(json_query "${file}" ".durationSeconds" || true)"
+  if ! [[ "${parsed}" =~ ^[0-9]+$ ]]; then
+    fail "durationSeconds debe ser un entero >= 0 (obtenido: '${parsed}')"
+  fi
+  parsed="$(json_query "${file}" ".exitCode" || true)"
+  assert_equals "${expected_rc}" "${parsed}" "verification.json debe registrar el exitCode real"
 }
 
 # argumentos que recibió el wrapper de mentira en el repo $1
@@ -228,7 +305,8 @@ test_verify_pasa_y_deja_la_misma_evidencia() {
   evidence="$(evidence_dir_of "${dir}")"
   assert_not_empty "${evidence}" "verify debe crear el directorio de evidencia"
   if [[ -n "${evidence}" ]]; then
-    assert_contains "$(tr -d '\r' < "${evidence}/verification.json")" '"result": "PASSED"' \
+    assert_verification_json "${evidence}" 0
+    assert_equals "PASSED" "$(json_query "${evidence}/verification.json" ".result" || true)" \
       "verification.json debe registrar el resultado"
     [[ -f "${evidence}/source-state.txt" ]] || fail "la evidencia debe incluir source-state.txt"
     [[ -f "${evidence}/command.log" ]] || fail "la evidencia debe incluir command.log"
@@ -246,7 +324,8 @@ test_verify_falla_con_el_exit_code_de_maven_y_lo_registra() {
   evidence="$(evidence_dir_of "${dir}")"
   assert_not_empty "${evidence}" "verify debe dejar evidencia también cuando falla"
   if [[ -n "${evidence}" ]]; then
-    assert_contains "$(tr -d '\r' < "${evidence}/verification.json")" '"result": "FAILED"' \
+    assert_verification_json "${evidence}" 1
+    assert_equals "FAILED" "$(json_query "${evidence}/verification.json" ".result" || true)" \
       "verification.json debe registrar el fallo"
   fi
 }
