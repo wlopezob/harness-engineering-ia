@@ -7,6 +7,22 @@ components:
       properties:
         message:
           type: string
+    BulkStockAdjustmentItem:
+      type: object
+      properties:
+        productId:
+          type: integer
+          format: int64
+        delta:
+          type: integer
+          format: int32
+    BulkStockAdjustmentRequest:
+      type: object
+      properties:
+        adjustments:
+          type: array
+          items:
+            $ref: "#/components/schemas/BulkStockAdjustmentItem"
     CreateProductRequest:
       type: object
       properties:
@@ -268,6 +284,47 @@ paths:
       summary: Stock Movements
       tags:
       - Product Resource
+  /inventory/stock-adjustments:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkStockAdjustmentRequest"
+        required: true
+      responses:
+        "200":
+          description: "Ajustes aplicados; devuelve cada producto con su cantidad\
+            \ resultante, en el orden de la petición"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProductResponse"
+        "400":
+          description: "Lote inválido (vacío, producto repetido, producto ausente\
+            \ en un ajuste, delta cero o resultado fuera del rango admitido)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Alguno de los productos no existe; no se aplicó ningún ajuste
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Alguno de los ajustes dejaría el stock en negativo; no se aplicó
+            ningún ajuste
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+      summary: Adjust All
+      tags:
+      - Stock Adjustment Resource
 info:
   title: api API
   version: 1.0.0-SNAPSHOT

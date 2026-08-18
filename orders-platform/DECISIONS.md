@@ -442,3 +442,57 @@ al código de salida**, con Maven pasando y fallando. Reglas que quedan: **en
 la aritmética de `set /a` va entre comillas, los `exit /b` con código van en
 nivel superior, y nada se parsea de `%TIME%`; en la suite, una corrida con
 errores internos del intérprete nunca es verde.** Ver `specs/github-30/plan.md`.
+
+## 2026-08-17 — Ajustes de stock de varios productos (github-32)
+
+### D-029 — Un lote de ajustes es una operación: se calcula entero antes de escribir nada
+`POST /inventory/stock-adjustments` con `{ "adjustments": [ { "productId", "delta" } ] }`
+aplica varios ajustes como UNA operación y responde **200** con un array de
+`ProductResponse` en el orden de la petición (la cantidad resultante de cada
+producto). El endpoint individual
+`POST /inventory/products/{id}/stock-adjustments` **se conserva** y pasa a
+delegar: `handle(id, delta)` es `handleAll(List.of(new StockAdjustment(id, delta)))`.
+Vive en un adapter propio (`StockAdjustmentResource`) porque la operación es
+sobre el inventario, no sobre un producto, y así no depende del desempate de
+JAX-RS entre el segmento literal y la plantilla `{id}`.
+
+**Cómo se garantiza "todos o ninguno".** `AdjustStockUseCase.handleAll` trabaja
+en tres fases: (1) construir el lote —`StockAdjustmentBatch` rechaza lote vacío,
+elemento nulo y producto repetido—, (2) cargar los productos —el primero que
+falte lanza `ProductNotFoundException`—, (3) calcular con
+`Product.adjustStock`, que es **puro** —delta cero y stock insuficiente rechazan
+aquí— y solo entonces (4) escribir `update` + `save` de cada movimiento. Las
+tres primeras fases no escriben: cuando el lote se rechaza, `update` y `save`
+**no se han llamado ni una vez**, así que la garantía no depende del rollback. El
+`@Transactional` de D-022 sigue siendo la red para el fallo que ocurra ya
+escribiendo (el diente:
+`si_falla_el_movimiento_del_segundo_producto_ninguno_cambia_su_stock`).
+**Por qué importa el orden:** la implementación ingenua —un solo recorrido que
+busca, ajusta y escribe— pasa el camino feliz y **falla el issue en silencio**;
+se implementó primero a propósito y el rojo lo dejó por escrito (`update`
+invocado desde `lambda$handleAll$2` cuando el test lo prohibía).
+
+**Códigos (fail-fast, en orden de petición):** 400 lote vacío / producto
+repetido / ajuste sin producto / delta cero / desbordamiento; 404 producto
+inexistente o eliminado (D-024); 409 stock resultante negativo. Se descartó el
+reporte agregado de todos los problemas: exigiría un schema de error nuevo y
+decidir qué código gana al mezclar 404 y 409, y el issue pide rechazo total, no
+un informe. Todos los movimientos del lote comparten el `occurredAt`: el reloj
+se lee **una vez** por operación (el desempate por `id desc` del historial ya
+existía, D-023).
+
+**Las reglas del lote viven en el constructor compacto de
+`StockAdjustmentBatch`, no en su factory.** Lo forzó SpotBugs (`EI_EXPOSE_REP2`,
+HARNESS I): con la validación y la copia solo en `of`, el constructor canónico
+del record —público por serlo un record— seguía admitiendo un lote inválido o
+atado a una lista mutable ajena. Con las reglas en el constructor, el estado
+inválido es irrepresentable por cualquier vía. Misma razón en
+`BulkStockAdjustmentRequest`, que además normaliza los huecos del cliente
+(cuerpo sin `adjustments` → lote vacío; elemento nulo → ajuste sin producto) para
+que los rechace **el dominio** con 400: antes, `{"adjustments":[null]}` reventaba
+en `NullPointerException` → 500. Se usa `List.copyOf` porque es la copia que
+SpotBugs reconoce en el accessor de un record.
+
+Sin migración Flyway: el lote no añade tablas ni columnas. Sigue vigente D-021
+(read-modify-write sin bloqueo), ahora sobre N productos; el issue deja fuera
+idempotencia, ejecución parcial y concurrencia. Ver `specs/github-32/plan.md`.
