@@ -41,6 +41,7 @@ exit /b 2
 call :get_timestamp
 set "STARTED_AT=%TIMESTAMP_ISO%"
 set "RUN_TIMESTAMP=%TIMESTAMP_FILE%"
+set "START_EPOCH=%TIMESTAMP_EPOCH%"
 
 for /f "delims=" %%A in ('git -C "%ROOT_DIR%" rev-parse HEAD 2^>nul') do set "COMMIT_SHA=%%A"
 if not defined COMMIT_SHA set "COMMIT_SHA=unknown"
@@ -95,7 +96,6 @@ if "!SOURCE_DIRTY!"=="true" (
 
 echo.
 
-set "START_SECONDS=%TIME%"
 set "EXIT_CODE=0"
 
 if not exist "%API_DIR%" (
@@ -126,9 +126,7 @@ call :copy_reports
 
 call :get_timestamp
 set "FINISHED_AT=%TIMESTAMP_ISO%"
-
-call :calculate_duration "%START_SECONDS%" "%TIME%"
-set "DURATION_SECONDS=%DURATION_RESULT%"
+set /a "DURATION_SECONDS=%TIMESTAMP_EPOCH%-%START_EPOCH%"
 
 if "%EXIT_CODE%"=="0" (
     set "RESULT=PASSED"
@@ -246,33 +244,19 @@ if exist "%API_DIR%\target\pit-reports" (
 exit /b 0
 
 :get_timestamp
-for /f %%A in ('powershell -NoProfile -Command "(Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')"') do set "TIMESTAMP_ISO=%%A"
-
-for /f %%A in ('powershell -NoProfile -Command "(Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')"') do set "TIMESTAMP_FILE=%%A"
-
-exit /b 0
-
-:calculate_duration
-set "START_TIME=%~1"
-set "END_TIME=%~2"
-
-rem la expresion va entre comillas: dentro de un bloque ( ... ), cmd toma el
-rem primer ) de la aritmetica como cierre del bloque y aborta el batch con
-rem "was unexpected at this time" (lo cazo la suite de contrato en windows-latest;
-rem verify nunca habia llegado hasta aqui en CI)
-for /f "tokens=1-4 delims=:.," %%A in ("%START_TIME%") do (
-    set /a "START_TOTAL=(((1%%A-100)*60+(1%%B-100))*60+(1%%C-100))"
+rem Una sola llamada a PowerShell devuelve el instante UTC en los tres formatos
+rem que usa verify: ISO para el JSON, compacto para el nombre del directorio y
+rem epoch (segundos) para durationSeconds, igual que `date +%%s` en ./harness.
+rem Antes la duracion se calculaba parseando la variable TIME de cmd, que lleva
+rem un espacio inicial cuando la hora tiene un digito (" 0:22:11.13"): set /a
+rem recibia "(1 0-100)", imprimia "Unbalanced parenthesis." y durationSeconds
+rem quedaba en 0 sin avisar, de 00:00 a 09:59. Lo cazo la suite de contrato en
+rem windows-latest; el epoch no depende de la hora ni del formato del locale.
+for /f "tokens=1-3" %%A in ('powershell -NoProfile -Command "$u = [DateTime]::UtcNow; Write-Output ($u.ToString('yyyy-MM-ddTHH:mm:ssZ') + ' ' + $u.ToString('yyyyMMddTHHmmssZ') + ' ' + [DateTimeOffset]::new($u).ToUnixTimeSeconds())"') do (
+    set "TIMESTAMP_ISO=%%A"
+    set "TIMESTAMP_FILE=%%B"
+    set "TIMESTAMP_EPOCH=%%C"
 )
-
-for /f "tokens=1-4 delims=:.," %%A in ("%END_TIME%") do (
-    set /a "END_TOTAL=(((1%%A-100)*60+(1%%B-100))*60+(1%%C-100))"
-)
-
-if !END_TOTAL! LSS !START_TOTAL! (
-    set /a END_TOTAL+=86400
-)
-
-set /a DURATION_RESULT=END_TOTAL-START_TOTAL
 
 exit /b 0
 

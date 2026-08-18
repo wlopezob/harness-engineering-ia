@@ -40,7 +40,8 @@ esac
 
 # Repo git temporal con los dos scripts y los dos wrappers de mentira. Los
 # wrappers escriben "$*" en mvnw-args.txt, fabrican un pit-reports mínimo (como
-# haría PIT) y salen con HARNESS_TEST_MVNW_EXIT (0 por defecto).
+# haría PIT), duermen HARNESS_TEST_MVNW_SLEEP segundos si se pide (para que
+# durationSeconds tenga algo que medir) y salen con HARNESS_TEST_MVNW_EXIT.
 new_repo() {
   local dir api
   dir="$(mktemp -d "${TEST_TMP_ROOT}/repo.XXXXXX")"
@@ -59,6 +60,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 printf '%s\n' "$*" > "${here}/mvnw-args.txt"
 mkdir -p "${here}/target/pit-reports"
 printf '<html/>\n' > "${here}/target/pit-reports/index.html"
+[[ -n "${HARNESS_TEST_MVNW_SLEEP:-}" ]] && sleep "${HARNESS_TEST_MVNW_SLEEP}"
 exit "${HARNESS_TEST_MVNW_EXIT:-0}"
 STUB
   chmod +x "${api}/mvnw"
@@ -69,6 +71,7 @@ STUB
     'echo %* > "%~dp0mvnw-args.txt"' \
     'if not exist "%~dp0target\pit-reports" mkdir "%~dp0target\pit-reports"' \
     'echo ^<html/^> > "%~dp0target\pit-reports\index.html"' \
+    'if defined HARNESS_TEST_MVNW_SLEEP powershell -NoProfile -Command "Start-Sleep -Seconds %HARNESS_TEST_MVNW_SLEEP%"' \
     'if not defined HARNESS_TEST_MVNW_EXIT set "HARNESS_TEST_MVNW_EXIT=0"' \
     'exit /b %HARNESS_TEST_MVNW_EXIT%' \
     > "${api}/mvnw.cmd"
@@ -294,9 +297,11 @@ test_format_sin_wrapper_falla_con_2() {
 # --- verify ------------------------------------------------------------------
 
 test_verify_pasa_y_deja_la_misma_evidencia() {
-  local dir evidence
+  local dir evidence duration
   dir="$(new_repo)"
-  run_harness "${dir}" verify
+  # Maven "tarda" 2 s: durationSeconds tiene que medirlo de verdad, no ser un
+  # 0 que pasa por número válido (harness.cmd lo dejaba en 0 de 00:00 a 09:59)
+  HARNESS_TEST_MVNW_SLEEP=2 run_harness "${dir}" verify
   assert_equals "0" "${HARNESS_RC}" "verify debe salir con 0 cuando Maven termina bien"
   assert_equals "--batch-mode --no-transfer-progress clean verify" "$(mvnw_args_of "${dir}")" \
     "verify debe pasar a Maven clean verify"
@@ -308,6 +313,10 @@ test_verify_pasa_y_deja_la_misma_evidencia() {
     assert_verification_json "${evidence}" 0
     assert_equals "PASSED" "$(json_query "${evidence}/verification.json" ".result" || true)" \
       "verification.json debe registrar el resultado"
+    duration="$(json_query "${evidence}/verification.json" ".durationSeconds" || true)"
+    if ! [[ "${duration}" =~ ^[0-9]+$ ]] || [[ "${duration}" -lt 2 ]]; then
+      fail "durationSeconds debe medir la corrida (Maven durmió 2 s; obtenido: '${duration}')"
+    fi
     [[ -f "${evidence}/source-state.txt" ]] || fail "la evidencia debe incluir source-state.txt"
     [[ -f "${evidence}/command.log" ]] || fail "la evidencia debe incluir command.log"
     [[ -f "${evidence}/test-reports/pit-reports/index.html" ]] \
