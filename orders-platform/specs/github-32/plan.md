@@ -296,9 +296,114 @@ y lista vacía).
 
 ## Resultado
 
-_(se completa durante la implementación: rojos observados, mutantes, evidencia
-de `./harness verify` y `./harness mutation`)_
+### Ciclo TDD (rojos observados)
+
+* **RED 1** — `cannot find symbol: StockAdjustment / StockAdjustmentBatch`.
+  GREEN: los dos records, sin ninguna validación todavía.
+* **RED 2–4** — `Expected java.lang.IllegalArgumentException to be thrown, but
+  nothing was thrown` ×3 (lote vacío, lote nulo, producto repetido). GREEN: las
+  tres guardas en la construcción del lote.
+* **RED 5–6** — el ítem nulo dentro del lote daba
+  `NullPointerException` en vez de un rechazo (habría salido **500**, no 400), y
+  el `productId` nulo no se rechazaba. Este rojo **no estaba en el plan**: apareció
+  al escribir el caso y era un defecto real del borde. GREEN: guarda de elementos
+  nulos en el lote y `productId` obligatorio en `StockAdjustment`.
+* **RED 7** — `cannot find symbol: handleAll`. GREEN **ingenuo a propósito**: un
+  solo recorrido que busca, ajusta y escribe cada ajuste.
+* **RED 8–10 (el rojo que define el issue)** — con ese recorrido, los tres casos
+  de rechazo fallaron con el mensaje exacto del defecto:
+
+  ```
+  Never wanted here: handleAll_no_escribe_nada_cuando_un_producto_del_lote_no_existe
+  But invoked here:  AdjustStockUseCase.lambda$handleAll$2(AdjustStockUseCase.java:59)
+  ```
+
+  El `update` del primer producto ya había ocurrido cuando el segundo falló.
+  GREEN: las tres fases (cargar → calcular → escribir).
+* **REFACTOR** — `handle(id, delta)` pasa a ser
+  `handleAll(List.of(new StockAdjustment(id, delta))).getFirst()`; los 4 tests
+  del ajuste individual siguieron verdes sin tocarlos.
+* **RED 11** — la API respondía `404` al POST del lote (`Expected status code
+  <200> but was <404>`). GREEN: `StockAdjustmentResource` + request e ítem.
+* **RED 12 (contrato, HARNESS B)** — `OpenApiContractTest`: *El OpenAPI del
+  código difiere de contracts/openapi.yaml*. GREEN: contrato regenerado con
+  `curl` (nuevo path + `BulkStockAdjustmentRequest` y `BulkStockAdjustmentItem`,
+  los cuatro códigos con schema).
+* **RED 13 (SpotBugs, HARNESS I)** — `./harness verify` en **FAILED** con 4
+  hallazgos Medium `EI_EXPOSE_REP` / `EI_EXPOSE_REP2`: los constructores
+  canónicos de ambos records son públicos y no copiaban la lista (la copia
+  estaba solo en la factory). GREEN sin excluir nada: la validación y la copia
+  se mueven al **constructor compacto**, así ninguna vía de construcción crea un
+  lote inválido ni queda atada a una lista ajena.
+
+Los tests de API (10) y el de rollback pasaron a la primera, porque el
+comportamiento ya lo habían empujado los rojos de dominio y aplicación. Por eso
+se les dio dientes con la ronda de mutación.
+
+### Mutaciones a mano (cada mutante se aplica comprobando que el texto original exista)
+
+| Mutante | Suite que debía matarlo | Resultado |
+| ------- | ----------------------- | --------- |
+| `handleAll` sin `@Transactional` | `StockAdjustmentAtomicityTest` | **muerto** |
+| una sola pasada: escribe mientras recorre | `AdjustStockUseCaseTest` | **muerto** |
+| sin control de duplicados | `StockAdjustmentBatchTest` | **muerto** |
+| duplicados por delta, no por producto | `StockAdjustmentBatchTest` | **muerto** |
+| sin copia defensiva (`List.copyOf`) | `StockAdjustmentBatchTest` | **muerto** |
+| sin guarda de elementos nulos | `StockAdjustmentBatchTest` | **muerto** |
+| sin guarda de `productId` nulo | `StockAdjustmentBatchTest` | **muerto** |
+| lee el reloj una vez por ajuste | `AdjustStockUseCaseTest` | **muerto** |
+
+El último exigió reforzar antes el test del instante: con `Clock.fixed` no se
+distingue leer la hora una vez de leerla N veces, así que ese test usa ahora un
+`TickingClock` que avanza un segundo en cada lectura.
+
+### Verificación (D4)
+
+* `./harness verify` → **`HARNESS RESULT: PASSED`**, `Tests run: 90, Failures: 0,
+  Errors: 0, Skipped: 0` (68 antes del cambio + 22 nuevos), JaCoCo 80/80 y
+  SpotBugs en verde. Evidencia:
+  `artifacts/harness/20260818T013458Z-64824a7-dirty-ab730f2/`
+  (`verification.json`: `result PASSED`, `exitCode 0`, `durationSeconds 15`,
+  `source.state ab730f25…`).
+* `./harness mutation` → `MUTATION RESULT: COMPLETED`, **47 mutantes, 44 muertos
+  (94 %)**, test strength 98 % (umbral 80). El código nuevo mata todos los suyos:
+  `AdjustStockUseCase` 6/6, `StockAdjustmentBatch` 3/3. Los 3 supervivientes son
+  **preexistentes** y ajenos a este cambio: la frontera `quantity < 0` de
+  `Product.requireQuantity` y los accessors de `ProductNotFoundException.id` y
+  `DuplicateSkuException.sku` (sin cobertura).
+* Suites del harness (gate obligatorio en CI): `contract_test.sh` 14,
+  `parity_test.sh` 5, `selftest_gate_test.sh` 10, `state_test.sh` 16 — todas
+  `PASSED`, 0 failed.
+* Comprobación manual contra la app en dev (Postgres efímero, porque el repo no
+  versiona un compose):
+
+  ```
+  lote válido      → [{"id":1,…,"quantity":15},{"id":2,…,"quantity":1}]
+  lote con id 999999 → {"message":"No existe un producto con id: 999999"} [HTTP 404]
+  estado después   → quantity 15 y 1  (el +100 del primer ajuste NO se aplicó)
+  movimientos de 1 → un solo movimiento, el del lote válido
+  ```
 
 ## Desviaciones respecto al plan
 
-_(se completa al cerrar el cambio)_
+1. **Dónde viven las reglas del lote:** el plan las ponía en la factory
+   `StockAdjustmentBatch.of`; SpotBugs (`EI_EXPOSE_REP2`) demostró que el
+   constructor canónico del record seguía siendo una puerta abierta. Se movieron
+   al constructor compacto y `of` quedó como delegación. Mejora el diseño: el
+   lote inválido es irrepresentable.
+2. **Elementos nulos del JSON:** el plan no los contemplaba. El caso
+   `{"adjustments":[null]}` daba `NullPointerException` → 500. Ahora
+   `BulkStockAdjustmentRequest` normaliza el hueco (cuerpo sin `adjustments` →
+   lote vacío; ítem nulo → ajuste sin producto) y el **dominio** lo rechaza con
+   400. La normalización usa `List.copyOf` porque es la copia que SpotBugs
+   reconoce en el accessor del record; `Collections.unmodifiableList(new
+   ArrayList<>(…))` seguía marcando `EI_EXPOSE_REP`.
+3. **Dos tests extra** sobre lo planeado: el del ítem nulo (caso 5–6 arriba) y la
+   separación del caso 7 del plan en copia defensiva + lista inmutable.
+4. **El test del instante** se reforzó con `TickingClock`; el plan solo pedía
+   comprobar `occurredAt`, y con un reloj fijo eso no tenía dientes.
+5. **Regeneración del contrato:** hizo falta levantar un Postgres efímero
+   (`docker run postgres:16-alpine`, mismos datos que documenta `%dev`) porque el
+   repo no versiona el `docker-compose`. El contenedor se eliminó al terminar.
+6. Todo lo demás (ruta, códigos, fail-fast, cuerpos, tres fases, delegación del
+   ajuste individual, sin migración) salió como estaba planeado.
