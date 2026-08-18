@@ -81,6 +81,14 @@ run_test() {
   fi
 }
 
+# Directorio de evidencia de la única corrida del repo temporal $1 (vacío si no
+# hay ninguna). El `|| true` importa: si artifacts/harness no existe, find sale
+# con 1 y, en una asignación bajo pipefail, mataría el runner en vez de dejar
+# un FAIL legible.
+evidence_dir_of() {
+  find "$1/artifacts/harness" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -1 || true
+}
+
 # Imprime el resumen y termina con 1 si algún test falló.
 finish_suite() {
   local summary

@@ -64,10 +64,6 @@ json_field() {
     "${file}" | head -1
 }
 
-# Directorio de evidencia de la única corrida del repo temporal.
-evidence_dir_of() {
-  find "$1/artifacts/harness" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -1
-}
 
 # Lee un campo del JSON que imprime `./harness state`.
 state_field() {

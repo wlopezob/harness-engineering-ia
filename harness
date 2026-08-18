@@ -31,7 +31,7 @@ Usage:
 
 Commands:
   verify   Run the complete backend verification harness.
-  format     Corrige el formato
+  format   Apply the repository formatting rules (spotless:apply).
   mutation Run mutation testing for domain and application.
   state    Print the identity of the source state that would be verified.
            Use `state --manifest <path>` to also dump the manifest behind it
@@ -363,6 +363,8 @@ verify_backend() {
 }
 
 mutation_backend() {
+  local exit_code
+
   echo "=================================================="
   echo " Engineering Harness: mutation testing"
   echo "=================================================="
@@ -382,6 +384,9 @@ mutation_backend() {
 
   chmod +x "${API_DIR}/mvnw"
 
+  # el exit code de Maven se propaga tal cual; el banner es el mismo que en
+  # harness.cmd (paridad de resultado principal, github-30)
+  set +e
   (
     cd "${API_DIR}"
 
@@ -391,6 +396,16 @@ mutation_backend() {
       test-compile \
       org.pitest:pitest-maven:mutationCoverage
   )
+  exit_code=$?
+  set -e
+
+  if [[ "${exit_code}" -ne 0 ]]; then
+    echo
+    echo "=================================================="
+    echo " MUTATION RESULT: FAILED"
+    echo "=================================================="
+    exit "${exit_code}"
+  fi
 
   echo
   echo "=================================================="
@@ -400,6 +415,8 @@ mutation_backend() {
 }
 
 format_backend() {
+  local exit_code
+
   echo "=================================================="
   echo " Engineering Harness: apply formatting"
   echo "=================================================="
@@ -411,6 +428,7 @@ format_backend() {
 
   chmod +x "${API_DIR}/mvnw"
 
+  set +e
   (
     cd "${API_DIR}"
 
@@ -419,6 +437,16 @@ format_backend() {
       --no-transfer-progress \
       spotless:apply
   )
+  exit_code=$?
+  set -e
+
+  if [[ "${exit_code}" -ne 0 ]]; then
+    echo
+    echo "=================================================="
+    echo " FORMAT RESULT: FAILED"
+    echo "=================================================="
+    exit "${exit_code}"
+  fi
 
   echo
   echo "=================================================="
