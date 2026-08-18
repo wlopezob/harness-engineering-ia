@@ -552,6 +552,18 @@ implementación y no en la otra falla en local, sin esperar a Windows. Como los
 self-tests del harness no tienen mutation testing, los casos nuevos se
 comprobaron con una batería de mutantes a mano sobre los dos scripts.
 
+**Lo que demostró ejecutar de verdad, otra vez:** el primer push dejó rojos los
+dos jobs de contrato con el mismo fallo, y no era del harness sino de la suite:
+un helper nuevo capturaba el stdout de `run_harness`, que con
+`HARNESS_TEST_VERBOSE=1` —lo que usan los dos jobs— lleva el volcado de la
+corrida entera, así que comparaba el dump en vez del identificador. En local,
+sin esa variable, todo estaba verde. Ahora el volcado va a **stderr**, de forma
+que ningún helper pueda arrastrarlo dentro de un valor, y el helper deja su
+resultado en una variable en vez de en stdout (lo que además evita que la
+subshell se trague sus aserciones). Regla que queda: **una suite que solo se
+ejecuta en un modo no está probada en el otro**; el contrato se corre en local
+con y sin `HARNESS_TEST_VERBOSE=1`.
+
 Refactor incluido: `verify` y `mutation` comparten en bash el arranque de la
 corrida (`start_run_evidence`, `print_run_header`) y en cmd la resolución del
 entorno (`:resolve_environment`), para que la evidencia de los dos comandos no

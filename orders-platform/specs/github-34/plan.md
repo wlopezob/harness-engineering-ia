@@ -359,6 +359,32 @@ declarado:   2753cde7d80e619d58563b47b0c8c2339a0a0906
 recomputado: 2753cde7d80e619d58563b47b0c8c2339a0a0906   (git hash-object --stdin < source-state.txt)
 ```
 
+### Lo que encontró el CI (y no se veía en local)
+
+El primer push dejó **rojos los dos jobs de contrato**, bash y cmd, con la
+misma aserción:
+
+```
+FAIL: la evidencia debe declarar el código de antes de correr PIT
+      (esperado: '    $ harness.cmd state  (rc=0)
+```
+
+El "esperado" traía dentro el volcado de la corrida. El helper `state_of`
+capturaba el stdout de `run_harness`, y los dos jobs corren con
+`HARNESS_TEST_VERBOSE=1` —la variable que vuelca cada corrida para poder
+depurar Windows—, así que el valor comparado era el dump entero en vez del
+identificador. En local, sin la variable, la suite estaba verde: un falso
+verde de manual, y esta vez del lado de la herramienta de test.
+
+Se arregló en dos capas, porque el helper era solo la mitad: `state_of` deja el
+valor en `STATE_OF` en lugar de en stdout (lo que además evita que la subshell
+se trague los `fail` que emite `run_harness`), y **el volcado verbose se manda
+a stderr**, de modo que ningún helper pueda volver a arrastrarlo dentro de un
+valor. La clase de fallo desaparece en vez de parchearse en un punto.
+
+Regla que queda: **una suite que solo se ejecuta en un modo no está probada en
+el otro** — el contrato se corre en local con y sin `HARNESS_TEST_VERBOSE=1`.
+
 ## Desviaciones respecto al plan
 
 * **El `help` no se tocó.** El plan preveía mencionar la evidencia en la
