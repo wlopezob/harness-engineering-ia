@@ -113,10 +113,13 @@ run_harness() {
   assert_no_interpreter_errors "${HARNESS_OUT}" "${PROGRAM} $*"
 
   # HARNESS_TEST_VERBOSE=1 vuelca cada corrida: en CI es la única forma de ver
-  # qué imprimió harness.cmd cuando una aserción falla en la otra plataforma
+  # qué imprimió harness.cmd cuando una aserción falla en la otra plataforma.
+  # Va a stderr a propósito: en stdout, un helper que capture run_harness se
+  # lleva el volcado dentro del valor, y eso solo se ve en CI (lo pagó este
+  # mismo issue: verde en local, rojo en los dos jobs).
   if [[ "${HARNESS_TEST_VERBOSE:-0}" == "1" ]]; then
-    printf '    $ %s %s  (rc=%s)\n' "${PROGRAM}" "$*" "${HARNESS_RC}"
-    printf '%s\n' "${HARNESS_OUT}" | sed 's/^/    | /'
+    printf '    $ %s %s  (rc=%s)\n' "${PROGRAM}" "$*" "${HARNESS_RC}" >&2
+    printf '%s\n' "${HARNESS_OUT}" | sed 's/^/    | /' >&2
   fi
 }
 
@@ -220,12 +223,19 @@ assert_verification_json() {
   assert_run_json "$1" "verification.json" "$2"
 }
 
-# identificador que imprime `harness state` en el repo $1 (deja HARNESS_OUT)
+# identificador que imprime `harness state` en el repo $1; lo deja en
+# STATE_OF, NO en stdout: con HARNESS_TEST_VERBOSE=1 (lo que usan los dos jobs
+# de CI) run_harness vuelca la corrida entera, y capturarla la metía dentro del
+# valor. Sin sustitución de comandos, además, los FAIL que emite run_harness
+# cuentan de verdad en vez de perderse en la subshell.
+STATE_OF=""
 state_of() {
   run_harness "$1" state
-  printf '%s\n' "${HARNESS_OUT}" \
-    | sed -n 's/.*"state": "\([0-9a-f]*\)".*/\1/p' \
-    | head -1
+  STATE_OF="$(
+    printf '%s\n' "${HARNESS_OUT}" \
+      | sed -n 's/.*"state": "\([0-9a-f]*\)".*/\1/p' \
+      | head -1
+  )"
 }
 
 # argumentos que recibió el wrapper de mentira en el repo $1
@@ -408,7 +418,8 @@ test_mutation_deja_evidencia_cuando_pit_falla() {
 test_la_evidencia_de_mutation_describe_el_codigo_de_antes_de_correr_pit() {
   local dir before after evidence json declared recomputed
   dir="$(new_repo)"
-  before="$(state_of "${dir}")"
+  state_of "${dir}"
+  before="${STATE_OF}"
   assert_not_empty "${before}" "el repo de prueba debe tener un state"
 
   # PIT genera un archivo que NO está ignorado: si el harness calculara la
@@ -416,7 +427,8 @@ test_la_evidencia_de_mutation_describe_el_codigo_de_antes_de_correr_pit() {
   HARNESS_TEST_MVNW_TOUCH="pit-generado.txt" run_harness "${dir}" mutation
   assert_equals "0" "${HARNESS_RC}" "mutation debe salir con 0"
 
-  after="$(state_of "${dir}")"
+  state_of "${dir}"
+  after="${STATE_OF}"
   assert_not_equals "${before}" "${after}" \
     "lo que generó PIT tiene que cambiar el state: si no, el caso no prueba nada"
 
