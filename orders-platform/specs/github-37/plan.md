@@ -140,11 +140,24 @@ Cambia la superficie de la API → `contracts/openapi.yaml` se regenera y se
 commitea en **este mismo cambio**, con `@APIResponse` por cada código (si no,
 `OpenApiFidelityTest` falla por `schema: {}`).
 
-**A verificar durante la implementación:** con Quarkus REST, `quantity=abc` no
-es convertible a `int`. El comportamiento real se fija con un test y se
-documenta en el contrato; si resultara un código que el contrato no declara, se
-corrige el código (no el YAML: rompería el match exacto de
-`OpenApiContractTest`).
+**Verificado durante la implementación (desviación del plan).** Con el
+parámetro declarado como `int`, `?quantity=abc` devolvía **404**: JAX-RS
+convierte el fallo de conversión de un `@QueryParam` en `NotFoundException`, así
+que la API respondía "no existe un producto con ese id" **sobre un producto que
+sí existe**. El contrato no mentía por omisión sino por significado, que es peor.
+
+Corrección (en el código, no en el YAML): el resource recibe `quantity` como
+`String` y lo convierte en el borde (`parseQuantity`), lanzando
+`IllegalArgumentException` → **400** por el mapper que ya existía. Para que el
+contrato siga describiendo la verdad, el parámetro se declara explícitamente
+`integer/int32` y **requerido** con `@Parameter`. Ausente → `null` → 0, que
+rechaza la misma regla del dominio.
+
+Consecuencia sobre el orden de errores: una cantidad **no representable**
+(`abc`, `2147483648`) se rechaza en el borde con 400 *antes* de mirar el
+producto, mientras que una cantidad representable pero inválida (`0`, `-1`)
+sigue cediendo el paso al 404. Es la separación correcta: petición malformada
+(sintaxis) vs. regla de negocio (dominio).
 
 ## Cambios propuestos
 
@@ -162,6 +175,7 @@ Modificados:
 ```
 domain/model/Product.java                 + checkAvailability(int) → StockAvailability
 infrastructure/rest/ProductResource.java  + GET /{id}/availability
+                                          + parseQuantity (conversión en el borde)
 contracts/openapi.yaml                    regenerado
 DECISIONS.md                              D-031
 specs/github-37/plan.md                   este plan (resultado de la verificación)
@@ -222,9 +236,14 @@ entrada real (`Product`), no se duplica.
     la cantidad es la misma que antes de consultar.
 17. id inexistente **y** `quantity=0` → 404 (fija el orden decidido arriba).
 
+18. *(agregado durante la implementación)* `quantity=abc` y
+    `quantity=2147483648` → **400**. Es el test que destapó el 404 falso
+    descrito arriba; se escribió esperando 400, se vio rojo con 404 y el arreglo
+    fue del código.
+
 ### D) Contrato
 
-18. Regenerar `contracts/openapi.yaml`; `OpenApiContractTest` y
+19. Regenerar `contracts/openapi.yaml`; `OpenApiContractTest` y
     `OpenApiFidelityTest` en verde.
 
 Los 90 tests actuales son la red de seguridad: ninguno debe cambiar. Si alguno
@@ -247,7 +266,26 @@ Al agregar lógica de dominio con ramas nuevas:
 
 ### Resultado
 
-*(se completa con la salida real de las corridas)*
+* `./harness verify` → **PASSED**, **108 tests** (90 de base + 18 nuevos), 0
+  fallos, JaCoCo dentro de umbral, Spotless y SpotBugs limpios.
+  Evidencia: `artifacts/harness/20260819T014807Z-1e64585-dirty-835226d/`.
+  La primera corrida salió **FAILED** por Spotless (formato del código nuevo);
+  se corrigió con `./harness format`, no bajando la regla.
+* `./harness mutation` → **COMPLETED**: 56 mutantes, 53 eliminados (95 %),
+  test strength 98 %. Evidencia:
+  `artifacts/harness/20260819T014841Z-1e64585-dirty-835226d-mutation/`.
+  **Sobre el código de este cambio no sobrevive ningún mutante** (8/8 muertos:
+  `Product.checkAvailability`, `StockAvailability.available` ×3,
+  `StockAvailability.missingQuantity` ×3, `CheckStockAvailabilityUseCase.handle`).
+  Ahí está el diente de los dos tests que pasaron a la primera: el
+  `ConditionalsBoundaryMutator` que convierte `>=` en `>` lo mata el caso del
+  límite exacto.
+  Los 3 supervivientes son los preexistentes ya documentados en github-21
+  (`Product.requireQuantity` y los accessors sin usar de
+  `ProductNotFoundException` y `DuplicateSkuException`): deuda previa, ajena a
+  este work item.
+  PIT no analiza `infrastructure`, así que `parseQuantity` no tiene mutantes;
+  su comportamiento lo sostienen los tests `@QuarkusTest` del caso 18.
 
 ## Assumptions
 
