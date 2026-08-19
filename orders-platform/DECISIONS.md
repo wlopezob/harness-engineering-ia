@@ -588,3 +588,62 @@ Refactor incluido: `verify` y `mutation` comparten en bash el arranque de la
 corrida (`start_run_evidence`, `print_run_header`) y en cmd la resolución del
 entorno (`:resolve_environment`), para que la evidencia de los dos comandos no
 pueda divergir por descuido. Ver `specs/github-34/plan.md`.
+
+## 2026-08-18 — Disponibilidad de stock de un producto (github-37)
+
+### D-031 — Consultar disponibilidad es una consulta pura, y el contrato lo dice
+`GET /inventory/products/{id}/availability?quantity=N` responde **200** con
+`{ productId, requestedQuantity, availableQuantity, available, missingQuantity }`:
+si el stock alcanza, `missingQuantity` es **0**, no se omite (schema estable,
+sin campos opcionales ni `null`, HARNESS C). Se eligió `GET` sobre un
+sub-recurso —como `/{id}/stock-movements`— para que la forma del endpoint
+sostenga el criterio del issue "consultar no modifica el stock" en vez de
+dejarlo en manos de la implementación. Descartados `POST
+/inventory/availability-checks` (un POST para una consulta pura sugiere
+escritura; el lote no lo pide el issue) y ampliar `GET /{id}` con `?quantity=N`
+(volvería condicional el schema de `ProductResponse`).
+
+**El criterio "no modifica el stock" quedó con dientes en tres capas**, no como
+promesa: el verbo `GET` en el contrato, `verify(repository, never()).update(any())`
+y `never()).save(any())` en `CheckStockAvailabilityUseCaseTest`, y un test
+`@QuarkusTest` que consulta y después relee el producto para comprobar que la
+cantidad no se movió. El caso de uso además **no lleva `@Transactional`**:
+no escribe por ninguna rama.
+
+**`available` y `missingQuantity` se derivan, no se almacenan.**
+`Product.checkAvailability(int)` devuelve un `record StockAvailability(productId,
+requestedQuantity, availableQuantity)` que calcula ambas: un estado incoherente
+(`available=true` con `missingQuantity=5`) es irrepresentable. La regla
+`requestedQuantity > 0` vive en el **constructor compacto**, no en un factory,
+por la lección de D-029: en un record el canónico es público y sería la puerta
+trasera. No hace falta el `long` de D-020: los dos operandos son enteros no
+negativos, la resta no desborda.
+
+**Producto inexistente o eliminado → 404**, coherente con el resto del recurso;
+`findById` ya no ve los `DELETED` (D-024), así que ese criterio del issue no
+costó código. El puerto `ProductRepository` **no cambió**: la feature completa
+se resolvió con `findById`.
+
+**Un `int` en el `@QueryParam` habría hecho mentir a la API.** Con
+`@QueryParam("quantity") int`, la petición `?quantity=abc` devolvía **404**:
+JAX-RS convierte el fallo de conversión de un query param en `NotFoundException`,
+o sea "no existe un producto con ese id" **sobre un producto que sí existe** —
+el mismo pecado de contrato que persiguió la feature 4 (D-009), esta vez por
+significado y no por omisión. Se corrigió el **código**, no el YAML: el resource
+recibe `String` y convierte en el borde (`parseQuantity` → `IllegalArgumentException`
+→ 400 con `ApiError` por el mapper existente), y el parámetro se declara
+`integer/int32` y **requerido** con `@Parameter` para que el contrato generado
+siga describiendo la verdad. El primer intento con `@DefaultValue("0")` producía
+`default: "0"` —un default *string* dentro de un schema `integer`— y se
+descartó: marcar el parámetro como requerido es a la vez más fiel y más simple.
+
+**Orden de los errores:** una cantidad no representable (`abc`,
+`2147483648`) se rechaza en el borde con 400 antes de mirar el producto;
+una representable pero inválida (`0`, `-1`) llega al dominio, así que el 404 del
+producto ausente gana. Es la separación entre petición malformada y regla de
+negocio, y está fijada con tests para que no dependa del azar.
+
+Sin migración Flyway y sin tocar el historial de movimientos: consultar no es un
+movimiento de stock. Fuera de alcance por el issue: reservas, cambios de stock,
+disponibilidad por almacén, backorders y pronósticos.
+Ver `specs/github-37/plan.md`.

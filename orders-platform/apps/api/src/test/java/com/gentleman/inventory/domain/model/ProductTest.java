@@ -1,8 +1,10 @@
 package com.gentleman.inventory.domain.model;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -138,5 +140,69 @@ class ProductTest {
     assertEquals("KEY-001", deleted.sku());
     assertEquals(10, deleted.quantity());
     assertEquals(ProductStatus.ACTIVE, original.status(), "inmutable: el original no cambia");
+  }
+
+  @Test
+  void check_availability_con_stock_mayor_que_lo_solicitado_esta_disponible() {
+    Product product = Product.restore(7L, "Teclado", "KEY-001", 10, ProductStatus.ACTIVE);
+
+    StockAvailability availability = product.checkAvailability(4);
+
+    assertTrue(availability.available(), "10 en stock cubren 4 solicitadas");
+    assertEquals(7L, availability.productId());
+    assertEquals(4, availability.requestedQuantity());
+    assertEquals(10, availability.availableQuantity());
+  }
+
+  @Test
+  void check_availability_con_stock_menor_no_esta_disponible_e_informa_lo_que_falta() {
+    Product product = Product.restore(7L, "Teclado", "KEY-001", 8, ProductStatus.ACTIVE);
+
+    StockAvailability availability = product.checkAvailability(10);
+
+    assertFalse(availability.available(), "8 en stock no cubren 10 solicitadas");
+    assertEquals(2, availability.missingQuantity(), "faltan 10 - 8");
+  }
+
+  @Test
+  void check_availability_no_reporta_faltante_cuando_el_stock_alcanza() {
+    Product product = Product.restore(7L, "Teclado", "KEY-001", 10, ProductStatus.ACTIVE);
+
+    StockAvailability availability = product.checkAvailability(4);
+
+    assertEquals(0, availability.missingQuantity(), "si alcanza, no falta nada: 0, no un negativo");
+  }
+
+  @Test
+  void check_availability_rechaza_una_cantidad_solicitada_de_cero() {
+    Product product = Product.restore(7L, "Teclado", "KEY-001", 10, ProductStatus.ACTIVE);
+
+    assertThrows(IllegalArgumentException.class, () -> product.checkAvailability(0));
+  }
+
+  @Test
+  void check_availability_rechaza_una_cantidad_solicitada_negativa() {
+    Product product = Product.restore(7L, "Teclado", "KEY-001", 10, ProductStatus.ACTIVE);
+
+    assertThrows(IllegalArgumentException.class, () -> product.checkAvailability(-1));
+  }
+
+  @Test
+  void check_availability_con_stock_exactamente_igual_esta_disponible() {
+    Product product = Product.restore(7L, "Teclado", "KEY-001", 10, ProductStatus.ACTIVE);
+
+    StockAvailability availability = product.checkAvailability(10);
+
+    assertTrue(availability.available(), "cubrir el pedido exacto alcanza: el límite es >=, no >");
+    assertEquals(0, availability.missingQuantity());
+  }
+
+  @Test
+  void check_availability_no_cambia_la_cantidad_del_producto() {
+    Product product = Product.restore(7L, "Teclado", "KEY-001", 10, ProductStatus.ACTIVE);
+
+    product.checkAvailability(4);
+
+    assertEquals(10, product.quantity(), "consultar no es un movimiento de stock");
   }
 }

@@ -64,6 +64,14 @@ public final class Product {
   }
 
   /**
+   * Consulta si este producto puede cubrir la cantidad solicitada. Es una consulta pura: no cambia
+   * el stock ni devuelve un producto nuevo, sino el resultado de la consulta.
+   */
+  public StockAvailability checkAvailability(int requestedQuantity) {
+    return new StockAvailability(this.id, requestedQuantity, this.quantity);
+  }
+
+  /**
    * Devuelve un NUEVO producto marcado como eliminado, conservando todos sus datos. El borrado es
    * un cambio de estado, no una desaparición: la fila y su historial permanecen.
    */
