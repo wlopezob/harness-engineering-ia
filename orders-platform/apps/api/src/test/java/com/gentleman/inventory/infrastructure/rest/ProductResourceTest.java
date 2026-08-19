@@ -533,4 +533,134 @@ class ProductResourceTest {
         .body("find { it.sku == 'LIST-A' }.name", equalTo("Producto A"))
         .body("find { it.sku == 'LIST-A' }.quantity", equalTo(7));
   }
+
+  @Test
+  void get_availability_con_stock_suficiente_devuelve_200_disponible() {
+    int id =
+        given()
+            .contentType("application/json")
+            .body("{\"name\":\"Teclado\",\"sku\":\"AVAIL-OK\",\"quantity\":10}")
+            .when()
+            .post("/inventory/products")
+            .then()
+            .statusCode(201)
+            .extract()
+            .path("id");
+
+    given()
+        .when()
+        .get("/inventory/products/" + id + "/availability?quantity=4")
+        .then()
+        .statusCode(200)
+        .body("productId", equalTo(id))
+        .body("requestedQuantity", equalTo(4))
+        .body("availableQuantity", equalTo(10))
+        .body("available", equalTo(true))
+        .body("missingQuantity", equalTo(0));
+  }
+
+  @Test
+  void get_availability_con_stock_insuficiente_devuelve_200_con_lo_que_falta() {
+    int id = crearProducto("AVAIL-SHORT", 8);
+
+    given()
+        .when()
+        .get("/inventory/products/" + id + "/availability?quantity=10")
+        .then()
+        .statusCode(200)
+        .body("available", equalTo(false))
+        .body("availableQuantity", equalTo(8))
+        .body("missingQuantity", equalTo(2));
+  }
+
+  @Test
+  void get_availability_con_cantidad_solicitada_invalida_devuelve_400() {
+    int id = crearProducto("AVAIL-BAD", 5);
+
+    given()
+        .when()
+        .get("/inventory/products/" + id + "/availability?quantity=0")
+        .then()
+        .statusCode(400)
+        .body("message", notNullValue());
+
+    given()
+        .when()
+        .get("/inventory/products/" + id + "/availability?quantity=-1")
+        .then()
+        .statusCode(400);
+
+    given().when().get("/inventory/products/" + id + "/availability").then().statusCode(400);
+  }
+
+  @Test
+  void get_availability_de_un_producto_inexistente_devuelve_404() {
+    given()
+        .when()
+        .get("/inventory/products/99999999/availability?quantity=1")
+        .then()
+        .statusCode(404)
+        .body("message", containsString("99999999"));
+  }
+
+  @Test
+  void get_availability_de_un_producto_eliminado_devuelve_404() {
+    int id = crearProducto("AVAIL-DEL", 10);
+
+    given().when().delete("/inventory/products/" + id).then().statusCode(204);
+
+    given()
+        .when()
+        .get("/inventory/products/" + id + "/availability?quantity=1")
+        .then()
+        .statusCode(404);
+  }
+
+  @Test
+  void get_availability_no_cambia_la_cantidad_del_producto() {
+    int id = crearProducto("AVAIL-KEEP", 7);
+
+    given()
+        .when()
+        .get("/inventory/products/" + id + "/availability?quantity=99")
+        .then()
+        .statusCode(200)
+        .body("available", equalTo(false));
+
+    given()
+        .when()
+        .get("/inventory/products/" + id)
+        .then()
+        .statusCode(200)
+        // consultar la disponibilidad no es un movimiento de stock: la cantidad sigue igual
+        .body("quantity", equalTo(7));
+  }
+
+  @Test
+  void get_availability_de_un_producto_inexistente_con_cantidad_invalida_devuelve_404() {
+    given()
+        .when()
+        .get("/inventory/products/99999999/availability?quantity=0")
+        .then()
+        // el producto se resuelve antes de validar la cantidad: 404 gana sobre 400
+        .statusCode(404);
+  }
+
+  @Test
+  void get_availability_con_cantidad_no_numerica_devuelve_400() {
+    int id = crearProducto("AVAIL-NAN", 5);
+
+    given()
+        .when()
+        .get("/inventory/products/" + id + "/availability?quantity=abc")
+        .then()
+        .statusCode(400);
+
+    given()
+        .when()
+        // fuera del rango de un int: tampoco es una cantidad representable
+        .get("/inventory/products/" + id + "/availability?quantity=2147483648")
+        .then()
+        .statusCode(400);
+  }
 }

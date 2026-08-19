@@ -57,6 +57,23 @@ components:
         delta:
           type: integer
           format: int32
+    StockAvailabilityResponse:
+      type: object
+      properties:
+        productId:
+          type: integer
+          format: int64
+        requestedQuantity:
+          type: integer
+          format: int32
+        availableQuantity:
+          type: integer
+          format: int32
+        available:
+          type: boolean
+        missingQuantity:
+          type: integer
+          format: int32
     StockMovementResponse:
       type: object
       properties:
@@ -211,6 +228,46 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
       summary: Delete
+      tags:
+      - Product Resource
+  /inventory/products/{id}/availability:
+    get:
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      - description: Cantidad solicitada; debe ser mayor que cero
+        in: query
+        name: quantity
+        required: true
+        schema:
+          format: int32
+          type: integer
+      responses:
+        "200":
+          description: "Disponibilidad del producto para la cantidad solicitada; alcance\
+            \ o no, la consulta se resolvió"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StockAvailabilityResponse"
+        "400":
+          description: "Cantidad solicitada inválida (ausente, no numérica, cero o\
+            \ negativa)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: No existe un producto con ese id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+      summary: Availability
       tags:
       - Product Resource
   /inventory/products/{id}/stock-adjustments:
