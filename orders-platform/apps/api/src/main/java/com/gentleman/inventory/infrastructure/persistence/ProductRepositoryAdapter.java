@@ -1,8 +1,10 @@
 package com.gentleman.inventory.infrastructure.persistence;
 
+import com.gentleman.inventory.domain.model.PageRequest;
 import com.gentleman.inventory.domain.model.Product;
 import com.gentleman.inventory.domain.model.ProductStatus;
 import com.gentleman.inventory.domain.port.ProductRepository;
+import io.quarkus.panache.common.Page;
 import io.quarkus.panache.common.Sort;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.transaction.Transactional;
@@ -40,10 +42,20 @@ public class ProductRepositoryAdapter implements ProductRepository {
 
   @Override
   @Transactional
-  public List<Product> findAll() {
-    return products.list("status", Sort.by("id"), ProductStatus.ACTIVE).stream()
+  public List<Product> findPage(PageRequest pageRequest) {
+    return products
+        .find("status", Sort.by("id"), ProductStatus.ACTIVE)
+        .page(Page.of(pageRequest.page(), pageRequest.size()))
+        .list()
+        .stream()
         .map(this::toDomain)
         .toList();
+  }
+
+  @Override
+  @Transactional
+  public long countActive() {
+    return products.count("status", ProductStatus.ACTIVE);
   }
 
   @Override

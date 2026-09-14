@@ -647,3 +647,65 @@ Sin migración Flyway y sin tocar el historial de movimientos: consultar no es u
 movimiento de stock. Fuera de alcance por el issue: reservas, cambios de stock,
 disponibilidad por almacén, backorders y pronósticos.
 Ver `specs/github-37/plan.md`.
+
+## 2026-09-14 — Paginar el listado de productos (github-39)
+
+### D-032 — `GET /inventory/products` cambia de array a envelope paginado
+`GET /inventory/products?page=&size=` responde **200** con `{ items, page,
+size, totalElements, totalPages, hasNext }` en vez del array plano de antes.
+Es un cambio de contrato deliberado, no aditivo: el issue pide que "la
+respuesta indique de forma explícita el total de elementos y si hay más
+páginas", y meter eso en headers HTTP (`X-Total-Count`, `Link`) habría dejado
+la fidelidad del contrato a medias (HARNESS B pide que el schema describa el
+body, no una convención de headers implícita). Los 2 tests existentes que
+asumían el array en la raíz (`get_lista_los_productos_registrados`,
+`delete_...actualiza_el_listado`) se actualizaron a `items.*` en el mismo
+cambio, con `?size=100` para seguir viendo todos los productos que crea la
+suite (~50 productos entre los tres archivos de test de `inventory.rest`).
+
+**`page` es 0-based y `size` tiene default 20 / máximo 100.** Ambos viven en
+`domain.model.PageRequest` (record), con la regla en el constructor canónico
+—el mismo patrón que `StockAvailability` (D-031) y `StockAdjustmentBatch`
+(D-029): en un record el canónico es público, así que la regla no puede vivir
+en un factory sin dejar una puerta trasera. `size` fuera de `(0, 100]` o
+`page` negativo → 400 con el `ApiError` existente, nunca un recorte
+silencioso ni una lista vacía.
+
+**`totalPages` y `hasNext` se derivan, no se guardan.** `domain.model.ProductPage`
+(record `items/page/size/totalElements`) calcula ambos en métodos: un
+`hasNext=true` en la última página sería un estado incoherente e
+irrepresentable, igual que D-031 con `available`/`missingQuantity`. Con
+`totalElements=0`, `totalPages()` es `0` (no `1`): no hay páginas que contar
+si no hay elementos, y `page=0` sigue siendo una respuesta válida y vacía.
+
+**Repetido el precedente D-031 con `page`/`size` como `String` en el
+`@QueryParam`.** Un `@QueryParam` tipado `int` convierte `?page=abc` en un
+**404** (RESTEasy trata el fallo de conversión como si el recurso no
+existiera), no en el 400 que pide un parámetro malformado. Se recibe como
+`String` y se parsea en el borde de `ProductResource`, con `IllegalArgumentException`
+→ 400 para el valor ausente-pero-no-numérico; el default (page=0, size=20) se
+aplica antes de parsear, no vía `@DefaultValue` (que en github-37 generó un
+default *string* en un schema `integer`).
+
+**El puerto `ProductRepository.findAll()` se reemplazó por `findPage`/`countActive`**,
+no se dejó al lado: no tenía otro consumidor. El orden sigue siendo por `id`
+(ya era determinístico desde la primera feature); paginar no necesitó tocar
+el criterio de orden. `ProductRepositoryAdapter.findPage` usa
+`io.quarkus.panache.common.Page.of(page, size)` de Panache, 0-based igual que
+el contrato.
+
+**SpotBugs (`EI_EXPOSE_REP`/`EI_EXPOSE_REP2`) sobre `ProductPage.items()` y
+`ProductPageResponse.items()`:** se resolvió con `items = List.copyOf(items)`
+en el constructor compacto, el mismo patrón ya establecido en
+`StockAdjustmentBatch`. No se justificó como excepción porque el fix directo
+ya existía como precedente en el repo.
+
+**Mutación:** `PageRequest` y `ProductPage` quedan con 100% de mutantes
+muertos (`./harness mutation`); los 3 mutantes que sobreviven o quedan sin
+cobertura pertenecen a código preexistente ajeno a este cambio
+(`Product.requireQuantity`, accessors de `ProductNotFoundException`/
+`DuplicateSkuException`) y no se tocaron: fuera del alcance del issue.
+
+Fuera de alcance por el issue: filtros por campo, `sort=` configurable por el
+cliente, y cambios en `GET /{id}` u otros endpoints de inventory.
+Ver `specs/github-39/plan.md`.

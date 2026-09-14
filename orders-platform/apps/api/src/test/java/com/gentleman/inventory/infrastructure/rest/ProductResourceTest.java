@@ -8,6 +8,7 @@ import static org.hamcrest.Matchers.hasItems;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 import io.quarkus.test.junit.QuarkusTest;
 import java.util.List;
@@ -408,10 +409,10 @@ class ProductResourceTest {
     given().when().delete("/inventory/products/" + id).then().statusCode(404);
     given()
         .when()
-        .get("/inventory/products")
+        .get("/inventory/products?size=100")
         .then()
         .statusCode(200)
-        .body("sku", not(hasItem("DEL-SOFT")));
+        .body("items.sku", not(hasItem("DEL-SOFT")));
   }
 
   @Test
@@ -525,13 +526,83 @@ class ProductResourceTest {
 
     given()
         .when()
+        .get("/inventory/products?size=100")
+        .then()
+        .statusCode(200)
+        .body("items.sku", hasItems("LIST-A", "LIST-B"))
+        .body("items.find { it.sku == 'LIST-A' }.id", notNullValue())
+        .body("items.find { it.sku == 'LIST-A' }.name", equalTo("Producto A"))
+        .body("items.find { it.sku == 'LIST-A' }.quantity", equalTo(7));
+  }
+
+  @Test
+  void get_lista_sin_parametros_usa_pagina_y_tamano_por_defecto() {
+    given()
+        .when()
         .get("/inventory/products")
         .then()
         .statusCode(200)
-        .body("sku", hasItems("LIST-A", "LIST-B"))
-        .body("find { it.sku == 'LIST-A' }.id", notNullValue())
-        .body("find { it.sku == 'LIST-A' }.name", equalTo("Producto A"))
-        .body("find { it.sku == 'LIST-A' }.quantity", equalTo(7));
+        .body("page", equalTo(0))
+        .body("size", equalTo(20))
+        .body("totalElements", notNullValue())
+        .body("totalPages", notNullValue())
+        .body("hasNext", notNullValue());
+  }
+
+  @Test
+  void get_lista_con_pagina_negativa_devuelve_400() {
+    given()
+        .when()
+        .get("/inventory/products?page=-1")
+        .then()
+        .statusCode(400)
+        .body("message", notNullValue());
+  }
+
+  @Test
+  void get_lista_con_tamano_cero_devuelve_400() {
+    given().when().get("/inventory/products?size=0").then().statusCode(400);
+  }
+
+  @Test
+  void get_lista_con_tamano_mayor_al_maximo_devuelve_400() {
+    given().when().get("/inventory/products?size=101").then().statusCode(400);
+  }
+
+  @Test
+  void get_lista_con_pagina_no_numerica_devuelve_400_y_no_404() {
+    given().when().get("/inventory/products?page=abc").then().statusCode(400);
+  }
+
+  @Test
+  void get_lista_paginada_no_repite_ni_salta_elementos() {
+    crearProducto("PAGE-A", 1);
+    crearProducto("PAGE-B", 2);
+
+    List<Object> primeraPagina =
+        given()
+            .when()
+            .get("/inventory/products?page=0&size=1")
+            .then()
+            .statusCode(200)
+            .body("items.size()", equalTo(1))
+            .extract()
+            .jsonPath()
+            .getList("items.id");
+    List<Object> segundaPagina =
+        given()
+            .when()
+            .get("/inventory/products?page=1&size=1")
+            .then()
+            .statusCode(200)
+            .body("items.size()", equalTo(1))
+            .extract()
+            .jsonPath()
+            .getList("items.id");
+
+    assertEquals(1, primeraPagina.size());
+    assertEquals(1, segundaPagina.size());
+    assertNotEquals(primeraPagina.get(0), segundaPagina.get(0));
   }
 
   @Test
