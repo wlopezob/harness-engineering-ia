@@ -38,6 +38,27 @@ components:
       format: date-time
       examples:
       - 2022-03-10T16:15:50Z
+    ProductPageResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductResponse"
+        page:
+          type: integer
+          format: int32
+        size:
+          type: integer
+          format: int32
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+          format: int32
+        hasNext:
+          type: boolean
     ProductResponse:
       type: object
       properties:
@@ -102,15 +123,35 @@ components:
 paths:
   /inventory/products:
     get:
+      parameters:
+      - description: Página a devolver (0-based)
+        in: query
+        name: page
+        schema:
+          format: int32
+          type: integer
+          default: 0
+      - description: Cantidad de productos por página
+        in: query
+        name: size
+        schema:
+          format: int32
+          type: integer
+          default: 20
       responses:
         "200":
-          description: Listado de productos
+          description: Página de productos
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/ProductResponse"
+                $ref: "#/components/schemas/ProductPageResponse"
+        "400":
+          description: "Parámetros de paginación inválidos (page negativo, size <=\
+            \ 0, size mayor al máximo permitido, o no numéricos)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
       summary: List
       tags:
       - Product Resource

@@ -8,6 +8,7 @@ import com.gentleman.inventory.application.usecase.GetProductUseCase;
 import com.gentleman.inventory.application.usecase.ListProductsUseCase;
 import com.gentleman.inventory.application.usecase.ListStockMovementsUseCase;
 import com.gentleman.inventory.application.usecase.UpdateProductUseCase;
+import com.gentleman.inventory.domain.model.PageRequest;
 import com.gentleman.inventory.domain.model.Product;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
@@ -103,15 +104,65 @@ public class ProductResource {
   }
 
   @GET
-  @APIResponse(
-      responseCode = "200",
-      description = "Listado de productos",
-      content =
-          @Content(
-              mediaType = MediaType.APPLICATION_JSON,
-              schema = @Schema(type = SchemaType.ARRAY, implementation = ProductResponse.class)))
-  public List<ProductResponse> list() {
-    return listProducts.handle().stream().map(ProductResponse::from).toList();
+  @APIResponses({
+    @APIResponse(
+        responseCode = "200",
+        description = "Página de productos",
+        content =
+            @Content(
+                mediaType = MediaType.APPLICATION_JSON,
+                schema = @Schema(implementation = ProductPageResponse.class))),
+    @APIResponse(
+        responseCode = "400",
+        description =
+            "Parámetros de paginación inválidos (page negativo, size <= 0, size mayor al máximo"
+                + " permitido, o no numéricos)",
+        content =
+            @Content(
+                mediaType = MediaType.APPLICATION_JSON,
+                schema = @Schema(implementation = ApiError.class)))
+  })
+  public ProductPageResponse list(
+      @Parameter(
+              name = "page",
+              in = ParameterIn.QUERY,
+              description = "Página a devolver (0-based)",
+              schema = @Schema(type = SchemaType.INTEGER, format = "int32", defaultValue = "0"))
+          @QueryParam("page")
+          String page,
+      @Parameter(
+              name = "size",
+              in = ParameterIn.QUERY,
+              description = "Cantidad de productos por página",
+              schema =
+                  @Schema(
+                      type = SchemaType.INTEGER,
+                      format = "int32",
+                      defaultValue = "" + PageRequest.DEFAULT_SIZE))
+          @QueryParam("size")
+          String size) {
+    return ProductPageResponse.from(
+        listProducts.handle(
+            parsePagingParam("page", page, 0),
+            parsePagingParam("size", size, PageRequest.DEFAULT_SIZE)));
+  }
+
+  /**
+   * Igual que {@link #parseQuantity(String)}: un {@code @QueryParam} tipado como {@code int}
+   * convierte un valor no numérico en un 404 (RESTEasy trata el fallo de conversión como si el
+   * recurso no existiera), no en el 400 que pide un parámetro de paginación malformado. Se recibe
+   * como {@code String} y se parsea en el borde.
+   */
+  private static int parsePagingParam(String name, String value, int defaultValue) {
+    if (value == null) {
+      return defaultValue;
+    }
+    try {
+      return Integer.parseInt(value.trim());
+    } catch (NumberFormatException e) {
+      throw new IllegalArgumentException(
+          "El parámetro '" + name + "' debe ser un número entero: " + value, e);
+    }
   }
 
   @GET

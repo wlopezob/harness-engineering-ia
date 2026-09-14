@@ -1,5 +1,6 @@
 package com.gentleman.inventory.domain.port;
 
+import com.gentleman.inventory.domain.model.PageRequest;
 import com.gentleman.inventory.domain.model.Product;
 import java.util.List;
 import java.util.Optional;
@@ -17,8 +18,11 @@ public interface ProductRepository {
   /** Indica si ya existe un producto con ese SKU. */
   boolean existsBySku(String sku);
 
-  /** Devuelve todos los productos activos, ordenados por id. */
-  List<Product> findAll();
+  /** Devuelve la ventana de productos activos que corresponde a la página pedida, por id. */
+  List<Product> findPage(PageRequest pageRequest);
+
+  /** Cuenta los productos activos, para el total de una página. */
+  long countActive();
 
   /** Busca un producto activo por su id; vacío si no existe o está eliminado. */
   Optional<Product> findById(Long id);
