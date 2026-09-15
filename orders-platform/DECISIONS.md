@@ -709,3 +709,67 @@ cobertura pertenecen a código preexistente ajeno a este cambio
 Fuera de alcance por el issue: filtros por campo, `sort=` configurable por el
 cliente, y cambios en `GET /{id}` u otros endpoints de inventory.
 Ver `specs/github-39/plan.md`.
+
+## 2026-09-15 — Señalar productos bajo un umbral de stock (github-40)
+
+### D-033 — `GET /inventory/products/low-stock?threshold=N`, array simple sin paginar
+
+Nuevo sub-recurso de solo lectura, mismo nivel que `/{id}/availability` y
+`/{id}/stock-movements`. Responde con un **array plano** de `ProductResponse`,
+no con el envelope paginado de `GET /inventory/products` (github-39).
+
+Descartado extender `GET /inventory/products?maxQuantity=N`: mezclaría el caso
+de uso "listar el catálogo paginado" con "alertar productos bajo un umbral" en
+el mismo endpoint y forzaría el envelope de paginación
+(`items/page/size/totalElements/totalPages/hasNext`) sobre una consulta que el
+issue no pide paginar (ni en criterios de aceptación ni en fuera de alcance).
+
+**`threshold` por defecto es 5** (decisión de negocio, documentada en el
+contrato vía `StockThreshold.DEFAULT`). **`threshold = 0` es una consulta
+válida** ("¿qué se agotó del todo?"), no un caso especial: solo un valor
+**negativo** es 400, porque no existe una cantidad negativa de stock.
+
+**La validación vive en `domain.model.StockThreshold`** (record), mismo patrón
+que `StockAvailability` (D-031) y `PageRequest` (D-032): la regla va en el
+constructor canónico porque en un record el canónico es público y sería la
+puerta trasera para construir un umbral inválido. El filtro real
+(`quantity <= threshold`) **no se duplica** como predicado en `Product`: al
+igual que `status = ACTIVE` en `findPage`/`countActive`, es un criterio de
+query que vive en `ProductRepositoryAdapter.findBelowOrEqualThreshold`
+(Panache), no una regla de negocio evaluada en memoria sobre objetos ya
+cargados. Consecuencia directa: los productos `DELETED` quedan fuera por el
+mismo filtro `status = ACTIVE` que ya usa el resto del repositorio (D-024),
+sin necesitar un caso especial.
+
+**Repetido el precedente D-031/D-032 con `threshold` como `String` en el
+`@QueryParam`.** Un `@QueryParam` tipado `int` convierte `?threshold=abc` en
+un 404 (RESTEasy trata el fallo de conversión como si el recurso no
+existiera), no en el 400 que pide un parámetro malformado. Se recibe como
+`String` y se parsea en el borde de `ProductResource` (`parseThreshold`), con
+`IllegalArgumentException` → 400 para el valor ausente-pero-no-numérico; el
+default se aplica antes de parsear.
+
+**Sin disputa 400-vs-404 (a diferencia de github-37/39).** Este endpoint es
+una consulta de colección, no de un id: no hay un producto de por medio, así
+que solo hay 200 (con o sin coincidencias) o 400.
+
+**El nuevo path `/inventory/products/low-stock` convive con `/{id}` sin
+ambigüedad.** RESTEasy Reactive prioriza el segmento literal sobre el
+template `{id}: Long` al resolver la ruta; verificado con los 5 tests REST
+nuevos (sin ellos, `low-stock` habría intentado convertirse a `Long` y
+fallado con 404, el mismo síntoma documentado en D-031/D-032 para un
+`@QueryParam` mal tipado, pero aquí en un segmento de path).
+
+**Mutación:** `StockThreshold` no genera una página propia en el reporte de
+PIT (mismo comportamiento ya observado con `PageRequest` desde github-39: un
+record cuya única lógica es la validación del constructor compacto no produce
+mutaciones para PIT). `ListLowStockProductsUseCase` queda con 100% de
+mutantes muertos. Los 3 mutantes que sobreviven o quedan sin cobertura en la
+corrida (`Product.requireQuantity`, accessors de
+`ProductNotFoundException`/`DuplicateSkuException`) son los mismos ya
+documentados en D-032, código preexistente ajeno a este cambio.
+
+Sin migración Flyway: no hay tablas ni columnas nuevas. Fuera de alcance por
+el issue: notificaciones o alertas automáticas, umbral configurable por
+producto, y reposición automática o sugerencia de cantidad a reordenar.
+Ver `specs/github-40/plan.md`.

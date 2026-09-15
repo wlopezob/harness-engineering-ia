@@ -228,6 +228,31 @@ plan de mutación lo pide:
 ./harness mutation
 ```
 
+## Resultado de la verificación (desviación del plan)
+
+Implementado tal como se diseñó, con dos ajustes menores detectados durante la
+implementación:
+
+* El caso de test 13 ("orden determinístico por id") se **descartó**: la
+  ordenación reutiliza el mismo `Sort.by("id")` ya probado por
+  `findPage`/`countActive` (github-39); no hay lógica de orden nueva que
+  triangular, así que un test dedicado solo repetiría cobertura existente sin
+  valor adicional. Los 5 tests REST implementados son: default de 5,
+  `threshold=0` sin coincidencias (200 `[]`), `threshold=-1` (400),
+  `threshold=abc` (400) y exclusión de productos eliminados.
+* La convivencia del path literal `/low-stock` con la ruta `/{id}` (Long) se
+  confirmó sin ambigüedad: RESTEasy Reactive prioriza el segmento literal, tal
+  como se anticipó en el diseño.
+
+`./harness verify`: 137/137 tests, cobertura y SpotBugs en verde,
+`OpenApiContractTest`/`OpenApiFidelityTest` verdes tras regenerar el contrato.
+`./harness mutation`: `ListLowStockProductsUseCase` 100% de mutantes muertos;
+`StockThreshold` no genera reporte propio en PIT (mismo comportamiento ya
+observado con `PageRequest`: un record cuya única lógica vive en el
+constructor compacto no produce mutaciones). Los 3 mutantes sobrevivientes de
+la corrida son los mismos ya documentados en D-032, ajenos a este cambio.
+Detalle completo en `DECISIONS.md` (D-033).
+
 ## Fuera de alcance (igual que el issue)
 
 * Notificaciones o alertas automáticas (email, webhook, etc.).
