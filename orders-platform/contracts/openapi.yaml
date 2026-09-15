@@ -189,6 +189,35 @@ paths:
       summary: Create
       tags:
       - Product Resource
+  /inventory/products/low-stock:
+    get:
+      parameters:
+      - description: Cantidad máxima de stock a partir de la cual un producto se señala
+        in: query
+        name: threshold
+        schema:
+          format: int32
+          type: integer
+          default: 5
+      responses:
+        "200":
+          description: "Productos activos cuya cantidad está en o por debajo del umbral;\
+            \ con o sin coincidencias, la consulta se resolvió"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProductResponse"
+        "400":
+          description: Umbral inválido (no numérico o negativo)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+      summary: Low Stock
+      tags:
+      - Product Resource
   /inventory/products/{id}:
     put:
       parameters:

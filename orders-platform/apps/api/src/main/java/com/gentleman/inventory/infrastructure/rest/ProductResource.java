@@ -5,11 +5,13 @@ import com.gentleman.inventory.application.usecase.CheckStockAvailabilityUseCase
 import com.gentleman.inventory.application.usecase.CreateProductUseCase;
 import com.gentleman.inventory.application.usecase.DeleteProductUseCase;
 import com.gentleman.inventory.application.usecase.GetProductUseCase;
+import com.gentleman.inventory.application.usecase.ListLowStockProductsUseCase;
 import com.gentleman.inventory.application.usecase.ListProductsUseCase;
 import com.gentleman.inventory.application.usecase.ListStockMovementsUseCase;
 import com.gentleman.inventory.application.usecase.UpdateProductUseCase;
 import com.gentleman.inventory.domain.model.PageRequest;
 import com.gentleman.inventory.domain.model.Product;
+import com.gentleman.inventory.domain.model.StockThreshold;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
@@ -48,6 +50,7 @@ public class ProductResource {
   private final AdjustStockUseCase adjustStock;
   private final ListStockMovementsUseCase listStockMovements;
   private final CheckStockAvailabilityUseCase checkStockAvailability;
+  private final ListLowStockProductsUseCase listLowStockProducts;
 
   public ProductResource(
       CreateProductUseCase createProduct,
@@ -57,7 +60,8 @@ public class ProductResource {
       DeleteProductUseCase deleteProduct,
       AdjustStockUseCase adjustStock,
       ListStockMovementsUseCase listStockMovements,
-      CheckStockAvailabilityUseCase checkStockAvailability) {
+      CheckStockAvailabilityUseCase checkStockAvailability,
+      ListLowStockProductsUseCase listLowStockProducts) {
     this.createProduct = createProduct;
     this.listProducts = listProducts;
     this.getProduct = getProduct;
@@ -66,6 +70,7 @@ public class ProductResource {
     this.adjustStock = adjustStock;
     this.listStockMovements = listStockMovements;
     this.checkStockAvailability = checkStockAvailability;
+    this.listLowStockProducts = listLowStockProducts;
   }
 
   @POST
@@ -162,6 +167,60 @@ public class ProductResource {
     } catch (NumberFormatException e) {
       throw new IllegalArgumentException(
           "El parámetro '" + name + "' debe ser un número entero: " + value, e);
+    }
+  }
+
+  @GET
+  @Path("/low-stock")
+  @APIResponses({
+    @APIResponse(
+        responseCode = "200",
+        description =
+            "Productos activos cuya cantidad está en o por debajo del umbral; con o sin"
+                + " coincidencias, la consulta se resolvió",
+        content =
+            @Content(
+                mediaType = MediaType.APPLICATION_JSON,
+                schema = @Schema(type = SchemaType.ARRAY, implementation = ProductResponse.class))),
+    @APIResponse(
+        responseCode = "400",
+        description = "Umbral inválido (no numérico o negativo)",
+        content =
+            @Content(
+                mediaType = MediaType.APPLICATION_JSON,
+                schema = @Schema(implementation = ApiError.class)))
+  })
+  public List<ProductResponse> lowStock(
+      @Parameter(
+              name = "threshold",
+              in = ParameterIn.QUERY,
+              description = "Cantidad máxima de stock a partir de la cual un producto se señala",
+              schema =
+                  @Schema(
+                      type = SchemaType.INTEGER,
+                      format = "int32",
+                      defaultValue = "" + StockThreshold.DEFAULT))
+          @QueryParam("threshold")
+          String threshold) {
+    return listLowStockProducts.handle(parseThreshold(threshold)).stream()
+        .map(ProductResponse::from)
+        .toList();
+  }
+
+  /**
+   * Igual que {@code parseQuantity}/{@code parsePagingParam}: un {@code @QueryParam} tipado como
+   * {@code int} convierte un valor no numérico en un 404 en vez del 400 que pide un parámetro
+   * malformado. Se recibe como {@code String} y se parsea en el borde.
+   */
+  private static int parseThreshold(String threshold) {
+    if (threshold == null) {
+      return StockThreshold.DEFAULT;
+    }
+    try {
+      return Integer.parseInt(threshold.trim());
+    } catch (NumberFormatException e) {
+      throw new IllegalArgumentException(
+          "El umbral de stock debe ser un número entero: " + threshold, e);
     }
   }
 

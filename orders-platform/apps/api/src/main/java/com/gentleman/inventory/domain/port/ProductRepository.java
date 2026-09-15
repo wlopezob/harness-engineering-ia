@@ -2,6 +2,7 @@ package com.gentleman.inventory.domain.port;
 
 import com.gentleman.inventory.domain.model.PageRequest;
 import com.gentleman.inventory.domain.model.Product;
+import com.gentleman.inventory.domain.model.StockThreshold;
 import java.util.List;
 import java.util.Optional;
 
@@ -23,6 +24,9 @@ public interface ProductRepository {
 
   /** Cuenta los productos activos, para el total de una página. */
   long countActive();
+
+  /** Devuelve los productos activos cuya cantidad está en o por debajo del umbral, por id. */
+  List<Product> findBelowOrEqualThreshold(StockThreshold threshold);
 
   /** Busca un producto activo por su id; vacío si no existe o está eliminado. */
   Optional<Product> findById(Long id);

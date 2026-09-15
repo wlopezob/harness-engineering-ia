@@ -734,4 +734,65 @@ class ProductResourceTest {
         .then()
         .statusCode(400);
   }
+
+  @Test
+  void get_low_stock_sin_threshold_usa_el_default_de_5() {
+    crearProducto("LOW-DEFAULT-IN", 3);
+    crearProducto("LOW-DEFAULT-OUT", 50);
+
+    given()
+        .when()
+        .get("/inventory/products/low-stock")
+        .then()
+        .statusCode(200)
+        .body("sku", hasItem("LOW-DEFAULT-IN"))
+        .body("sku", not(hasItem("LOW-DEFAULT-OUT")));
+  }
+
+  @Test
+  void get_low_stock_sin_coincidencias_devuelve_200_con_lista_vacia() {
+    // ningún fixture de esta suite crea un producto con quantity=0
+    given()
+        .when()
+        .get("/inventory/products/low-stock?threshold=0")
+        .then()
+        .statusCode(200)
+        .body("size()", equalTo(0));
+  }
+
+  @Test
+  void get_low_stock_con_threshold_negativo_devuelve_400() {
+    given()
+        .when()
+        .get("/inventory/products/low-stock?threshold=-1")
+        .then()
+        .statusCode(400)
+        .body("message", notNullValue());
+  }
+
+  @Test
+  void get_low_stock_con_threshold_no_numerico_devuelve_400_y_no_404() {
+    given().when().get("/inventory/products/low-stock?threshold=abc").then().statusCode(400);
+  }
+
+  @Test
+  void get_low_stock_no_incluye_productos_eliminados() {
+    int id = crearProducto("LOW-DEL", 2);
+
+    given()
+        .when()
+        .get("/inventory/products/low-stock?threshold=100")
+        .then()
+        .statusCode(200)
+        .body("sku", hasItem("LOW-DEL"));
+
+    given().when().delete("/inventory/products/" + id).then().statusCode(204);
+
+    given()
+        .when()
+        .get("/inventory/products/low-stock?threshold=100")
+        .then()
+        .statusCode(200)
+        .body("sku", not(hasItem("LOW-DEL")));
+  }
 }
