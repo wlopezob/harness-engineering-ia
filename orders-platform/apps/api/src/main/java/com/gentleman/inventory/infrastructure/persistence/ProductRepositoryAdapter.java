@@ -3,6 +3,7 @@ package com.gentleman.inventory.infrastructure.persistence;
 import com.gentleman.inventory.domain.model.PageRequest;
 import com.gentleman.inventory.domain.model.Product;
 import com.gentleman.inventory.domain.model.ProductStatus;
+import com.gentleman.inventory.domain.model.StockThreshold;
 import com.gentleman.inventory.domain.port.ProductRepository;
 import io.quarkus.panache.common.Page;
 import io.quarkus.panache.common.Sort;
@@ -56,6 +57,21 @@ public class ProductRepositoryAdapter implements ProductRepository {
   @Transactional
   public long countActive() {
     return products.count("status", ProductStatus.ACTIVE);
+  }
+
+  @Override
+  @Transactional
+  public List<Product> findBelowOrEqualThreshold(StockThreshold threshold) {
+    return products
+        .find(
+            "status = ?1 and quantity <= ?2",
+            Sort.by("id"),
+            ProductStatus.ACTIVE,
+            threshold.value())
+        .list()
+        .stream()
+        .map(this::toDomain)
+        .toList();
   }
 
   @Override
